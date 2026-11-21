@@ -1,0 +1,243 @@
+<title>Indicator Sky Display</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: square device hero, controls under it, two note cards. Single dark look on purpose (night instrument). */
+:root{
+  --bg:#070a12; --panel:#0e1320; --line:#1f2840; --fg:#dfe6f2; --muted:#8a96ad; --accent:#6fb6ff;
+  --go:#3ddc84; --maybe:#ffb43d; --no:#ff5a5a;
+  --f-display:"Space Grotesk",system-ui,sans-serif; --f-body:"Inter",system-ui,sans-serif;
+  --f-screen:"Barlow Semi Condensed","Arial Narrow",sans-serif;
+  color-scheme:dark;
+}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+.wrap{max-width:860px;margin:0 auto;display:grid;gap:28px}
+h1{font-family:var(--f-display);font-weight:600;font-size:1.7rem;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-family:var(--f-display);font-weight:600;font-size:1.1rem;margin:0 0 10px}
+.lede{color:var(--muted);margin:6px 0 0;max-width:62ch}
+.device{justify-self:center;width:min(100%,560px);background:linear-gradient(145deg,#f1f2f4,#c9ccd2);border-radius:28px;padding:clamp(14px,4.5%,28px);
+  box-shadow:0 40px 60px -30px #000, inset 0 1px 0 #fff, inset 0 -2px 0 #a9adb5;position:relative}
+.device::before{content:"";position:absolute;top:-5px;right:18%;width:38px;height:6px;border-radius:3px 3px 0 0;background:#b9bdc4}
+.bezel{background:#000;border-radius:12px;padding:3.5%}
+.screen{display:block;width:100%;aspect-ratio:1;border-radius:2px;background:#000;cursor:pointer;transition:filter .3s}
+.screen.night{filter:grayscale(1) sepia(1) saturate(6) hue-rotate(-38deg) brightness(.45)}
+.caption{color:var(--muted);font-size:.8rem;text-align:center;margin-top:-14px}
+.controls{display:grid;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.controls label{font-size:.85rem;color:var(--muted)}
+.controls output{font-family:var(--f-screen);font-size:1.05rem;font-variant-numeric:tabular-nums}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.toggle{display:flex;gap:8px;align-items:center;font-size:.85rem;color:var(--muted);cursor:pointer}
+.toggle input{accent-color:var(--accent)}
+.jump{display:flex;gap:8px;flex-wrap:wrap}
+.jump button{font:inherit;font-size:.8rem;background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:4px 12px;cursor:pointer}
+.jump button:hover,.jump button:focus-visible{border-color:var(--accent);outline:none}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;min-width:0}
+.card p,.card li{color:#c3cbe0;font-size:.9rem;margin:0}
+.card ul{margin:0;padding-left:18px;display:grid;gap:6px}
+table{border-collapse:collapse;width:100%;font-size:.85rem}
+td,th{text-align:left;padding:4px 10px 4px 0;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500;white-space:nowrap}
+a{color:var(--accent)}
+@media (prefers-reduced-motion:reduce){.screen{transition:none}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Indicator Sky Display</h1>
+    <p class="lede">The sky forecast display on Seeed's SenseCAP Indicator D1: a 4" square 480×480 touchscreen in a finished desk case. It uses the same Clear Sky Chart data (a sample site, fetched Sat 14 Nov 2026) and the same scoring as the <a href="bedside-sky-display.html">Bedside</a> and <a href="pocket-sky-display.html">Pocket</a> mockups.</p>
+  </header>
+
+  <div class="device"><div class="bezel"><canvas id="scr" class="screen" width="480" height="480" role="img" aria-label="Simulated 480 by 480 display"></canvas></div></div>
+  <p class="caption">Visible area about 72 × 72 mm. The square screen fits the full chart rows and a reminder panel.</p>
+
+  <div class="controls">
+    <div>
+      <div class="row"><label for="t">Simulated time</label><output id="tout" for="t"></output></div>
+      <input id="t" type="range" min="0" max="83" step="1" value="7">
+    </div>
+    <div class="row">
+      <div class="jump">
+        <button type="button" data-h="7">Sat 08:00</button>
+        <button type="button" data-h="15">Sat 16:00 (reminder)</button>
+        <button type="button" data-h="23">Sat 23:00</button>
+        <button type="button" data-h="38">Sun 15:00</button>
+        <button type="button" data-h="50">Mon 03:00</button>
+      </div>
+      <label class="toggle"><input id="night" type="checkbox"> Bedside night mode</label>
+    </div>
+  </div>
+
+  <div class="cols">
+    <section class="card">
+      <h2>The device</h2>
+      <table>
+        <tr><th>Screen</th><td>3.95" capacitive touch, 480 × 480</td></tr>
+        <tr><th>Chips</th><td>ESP32-S3 (Wi-Fi, BLE, 8 MB flash, 8 MB octal PSRAM) plus an RP2040 co-processor (2 MB flash)</td></tr>
+        <tr><th>Extras</th><td>Buzzer, microSD slot, Grove ports, user button</td></tr>
+        <tr><th>Power</th><td>USB-C, 5 V 1 A</td></tr>
+        <tr><th>Case</th><td>Finished desk enclosure, no printing needed</td></tr>
+        <tr><th>Price</th><td>USD $49</td></tr>
+      </table>
+    </section>
+    <section class="card">
+      <h2>What the extra space adds</h2>
+      <ul>
+        <li>The chart keeps every sky row from the Clear Sky Chart: RDPS, ECMWF and HRRR cloud, transparency, seeing and darkness, plus a score row. It covers 48 hours.</li>
+        <li>The tiles get room for a second detail line, so "models split" and the transparency are always visible.</li>
+        <li>A reminder panel uses the built-in buzzer: a short chime at 16:00 when tonight is GO, so there's time to set up the rigs. Tap the panel to silence it.</li>
+        <li>The ground panel shows tonight's highest humidity, with a dew warning at 85% or more, and the calmest wind.</li>
+      </ul>
+    </section>
+  </div>
+</div>
+
+<script>
+const D = {"start_utc": "2026-11-14T07:00:00Z", "utc_offset": -6, "n": 84, "rdps": [10, 8, 8, 9, 10, 8, 7, 8, 9, 10, 10, 10, 10, 10, 10, 10, 10, 6, 7, 6, 8, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 9, 8, 1, 1, 4, 10, 10, 10, 10, 6, 10, 10, 9, 8, 6, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 8, 9, 10, 10, 10, 10, 10, 10, 10, 10, 10], "ecmwf": [8, 4, 5, 2, 4, 5, 5, 7, 8, 9, 8, 9, 8, 7, 9, 9, 10, 7, 7, 7, 9, 9, 9, 9, 10, 5, 9, 4, 5, 5, 5, 4, 2, 2, 2, 2, 3, 8, 6, 8, 9, 8, 3, 2, 2, 1, 2, 3, 5, 7, 9, 10, 9, 8, 7, 2, 9, 8, 9, 9, 10, 10, 10, 10, 10, 10, 10, 4, 10, 10, 9, 8, 8, 9, 9, 8, 7, 6, 7, 5, 5, 9, 6, 10], "hrrr": [10, 10, 10, 10, 10, 10, 2, 2, 0, 10, 10, 10, 9, 0, 1, 0, 0, 0, 0, 0, 2, 10, 10, 10, 10, 10, 10, 10, 8, 7, 0, 3, 10, 10, 9, 0, 0, 10, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], "trans": [4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 0, 0, 0, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 3, 4, 4, 4, 0, 3, 4, 4, 4, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4], "seeing": [3, 3, 3, 3, 3, 3, 3, 3, 4, 3, 3, 2, 2, 2, 1, 1, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 2, 3, 2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3], "wind": [4, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 4, 4, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5], "hum": [13, 12, 11, 10, 10, 10, 9, 9, 9, 8, 6, 4, 3, 3, 3, 3, 4, 4, 5, 5, 5, 5, 5, 6, 7, 7, 7, 7, 8, 9, 10, 10, 10, 9, 6, 5, 4, 3, 3, 3, 3, 4, 6, 6, 6, 6, 7, 7, 7, 6, 5, 5, 4, 4, 4, 4, 4, 3, 3, 2, 2, 2, 2, 2, 2, 3, 4, 4, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 7, 8, 8, 7, 5, 4], "dark": ["000053", "000053", "000053", "000053", "000053", "000053", "00007E", "00EDFF", "FFC55E", "FFE2AF", "FFE9C1", "FFEBC9", "FFECCB", "FFECC9", "FFE9C3", "FFE4B4", "FFD07C", "00F3FF", "0019BC", "00005C", "000055", "000053", "000053", "000053", "000053", "000053", "000053", "000053", "000053", "000053", "000077", "00E5FF", "FFC258", "FFE2AE", "FFE8C1", "FFEBC8", "FFECCB", "FFEBC9", "FFE9C3", "FFE4B3", "FFCE79", "00F4FF", "0016BB", "00006C", "000066", "00005A", "000053", "000053", "000053", "000053", "000053", "000053", "000053", "000053", "000071", "00DEFF", "FFC051", "FFE1AD", "FFE8C0", "FFEBC8", "FFECCA", "FFEBC8", "FFE9C2", "FFE3B2", "FFCD75", "00F4FF", "0017BB", "000083", "00007F", "000076", "000065", "000053", "000053", "000053", "000053", "000053", "000053", "000053", "00006C", "00D7FF", "FFBD49", "FFE1AC", "FFE8BF", "FFEBC7"]};
+const START = Date.parse(D.start_utc), OFF = D.utc_offset, N = D.n;
+const C = {bg:"#04060b", tile:"#0c111c", line:"#1b2337", fg:"#e6ecf7", muted:"#7f8ba3", faint:"#4a5570",
+  go:"#3ddc84", maybe:"#ffb43d", no:"#ff5a5a", idle:"#5b6577", mid:"#d9333f", now:"#ffffff"};
+const CLOUD = "FAFAFA E9E9E9 C1C1C1 ADEDED 99D9D9 76B6F6 62A2E2 4E8ECE 2666A6 135393 003E7E".split(" ").map(h=>"#"+h);
+const FIVE  = "F9F9F9 C7C7C7 95D5D5 63A3E3 2C6CAC 003F7F".split(" ").map(h=>"#"+h);
+const TRANS_NAME = ["too cloudy","poor","below avg","average","above avg","transparent"];
+const HUM_LO = [0,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95];
+const WIND_KMH = [">72","46–72","28–45","19–27","9–18","0–8"];
+const DOW = ["SUN","MON","TUE","WED","THU","FRI","SAT"], MON = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+const REMIND_HOUR = 16;
+
+const local = i => { const d = new Date(START + (i + OFF) * 3600e3); return {h:d.getUTCHours(), dow:d.getUTCDay(), day:d.getUTCDate(), mon:d.getUTCMonth()}; };
+const hh = i => String(local(i).h).padStart(2,"0") + ":00";
+const h2 = i => String(local(i).h).padStart(2,"0");
+const isDark = i => { const c = D.dark[i]; return c && c.slice(0,2)==="00" && parseInt(c.slice(2,4),16) < 0x30; };
+
+function hourEval(i){
+  const m = ["rdps","ecmwf","hrrr"].map(k=>D[k][i]).filter(v=>v!=null);
+  if(!m.length) return null;
+  const mean = m.reduce((a,b)=>a+b,0)/m.length, cover = Math.round(100 - mean*10);
+  const spread = Math.max(...m) - Math.min(...m), t = D.trans[i] ?? 0;
+  const q = (cover<=20 && t>=3) ? 2 : (cover<=40 && t>=2) ? 1 : 0;
+  return {q, cover, spread, t, mean};
+}
+function nights(){
+  const out=[]; let s=null;
+  for(let i=0;i<=N;i++){ const d = i<N && isDark(i);
+    if(d && s===null) s=i;
+    if(!d && s!==null){ out.push({s, e:i-1, partial: i===N || s===0}); s=null; } }
+  return out;
+}
+const NIGHTS = nights();
+function rateNight(n){
+  if(!n) return {color:C.idle, word:"—", l1:"Beyond forecast", l2:""};
+  let best=0, bestS=n.s, run=0, runS=n.s, good=0, fair=0, agree=0, tot=0, hum=0, wind=5, tsum=0;
+  for(let i=n.s;i<=n.e;i++){ const h=hourEval(i); if(!h) continue; tot++; tsum+=h.t;
+    if(h.spread<=3) agree++;
+    if(h.q===2){ good++; if(run===0) runS=i; run++; if(run>best){best=run; bestS=runS;} } else run=0;
+    if(h.q===1) fair++;
+    hum=Math.max(hum, D.hum[i]??0); wind=Math.min(wind, D.wind[i]??5); }
+  const word = best>=4 ? "GO" : (best>=2 || good+fair>=4) ? "MAYBE" : "NO";
+  const color = {GO:C.go, MAYBE:C.maybe, NO:C.no}[word];
+  const l1 = best>=2 ? `Clear ${hh(bestS)}–${hh(bestS+best)}` : `Cloudy ${h2(n.s)}–${h2(n.e+1)}`;
+  const l2 = n.partial ? "Partial forecast" : (agree/Math.max(tot,1) >= .75 ? "Models agree" : "Models split");
+  return {color, word, l1, l2, best, hum, wind, tAvg: Math.round(tsum/Math.max(tot,1))};
+}
+function rateNow(i){
+  if(isDark(i)){ const h=hourEval(i);
+    if(!h) return {color:C.idle, word:"—", l1:"No data", l2:""};
+    return {color:[C.no,C.maybe,C.go][h.q], word:["NO","FAIR","CLEAR"][h.q], l1:`${h.cover}% cloud`, l2:`Transp. ${TRANS_NAME[h.t]}`}; }
+  const next = NIGHTS.find(n=>n.s>i), h = hourEval(i);
+  return {color:C.idle, word:"DAY", l1: next ? `Dark at ${hh(next.s)}` : "Daylight", l2: h ? `${h.cover}% cloud now` : ""};
+}
+function pickNights(i){ const k = NIGHTS.findIndex(n=>n.e>=i); return [k<0?null:NIGHTS[k], k<0?null:NIGHTS[k+1]||null]; }
+
+const cv = document.getElementById("scr"), g = cv.getContext("2d");
+const SCALE = 2; cv.width = 480*SCALE; cv.height = 480*SCALE; g.scale(SCALE,SCALE);
+const FONT = () => getComputedStyle(document.documentElement).getPropertyValue("--f-screen");
+function text(s,x,y,size,col,weight=600,align="left"){ g.font=`${weight} ${size}px ${FONT()}`; g.fillStyle=col; g.textAlign=align; g.fillText(s,x,y); }
+function card(x,y,w,h){ g.fillStyle=C.tile; g.beginPath(); g.roundRect(x,y,w,h,12); g.fill(); g.strokeStyle=C.line; g.lineWidth=1; g.stroke(); }
+function led(x,y,r,col,on){
+  if(on){ const gr=g.createRadialGradient(x,y,2,x,y,r*2.2); gr.addColorStop(0,col+"bb"); gr.addColorStop(1,col+"00");
+    g.fillStyle=gr; g.beginPath(); g.arc(x,y,r*2.2,0,7); g.fill(); }
+  g.fillStyle=col; g.beginPath(); g.arc(x,y,r,0,7); g.fill();
+  g.fillStyle="#ffffff55"; g.beginPath(); g.arc(x-r*.3,y-r*.3,r*.33,0,7); g.fill();
+}
+
+function tile(x,label,r){
+  const y=52, w=148, h=138, lit = r.word!=="DAY" && r.word!=="—";
+  card(x,y,w,h);
+  led(x+26,y+30,13,r.color,lit);
+  text(label,x+50,y+26,14,C.muted,600);
+  text(r.word,x+50,y+52,32,lit?r.color:C.muted,700);
+  text(r.l1,x+14,y+92,17,C.fg,600);
+  text(r.l2,x+14,y+116,14,C.muted,500);
+}
+
+function draw(){
+  const now=+t.value, L=local(now);
+  g.fillStyle=C.bg; g.fillRect(0,0,480,480);
+  text(`${DOW[L.dow]} ${L.day} ${MON[L.mon]}`,16,34,22,C.fg,600);
+  text(hh(now),464,34,22,C.fg,600,"right");
+  text("Clear Sky Chart",464-74,34,13,C.faint,500,"right");
+
+  const [tn,tm]=pickNights(now), a=rateNight(tn), b=rateNight(tm);
+  tile(10,"NOW",rateNow(now));
+  tile(166,tn && tn.s<=now ? "TONIGHT · NOW" : "TONIGHT",a);
+  tile(322,"TOMORROW",b);
+
+  // chart
+  const COLS=48, s=Math.max(0,Math.min(now-3,N-COLS)), x0=70, pitch=(468-x0)/COLS, cw=Math.max(1,pitch-1.2);
+  const rows=[["Score",null],["RDPS","rdps"],["ECMWF","ecmwf"],["HRRR","hrrr"],["Transp","trans"],["Seeing","seeing"],["Dark","dark"]];
+  const y0=222, rh=14, rp=18;
+  rows.forEach(([lab,k],r)=>{ const y=y0+r*rp;
+    text(lab,x0-8,y+11.5,13,r===0?C.fg:C.muted,600,"right");
+    for(let c=0;c<COLS;c++){ const i=s+c; if(i>=N) break; let col=null;
+      if(k===null){ const h=hourEval(i); col = isDark(i)&&h ? [C.no,C.maybe,C.go][h.q] : "#121826"; }
+      else if(k==="dark") col="#"+D.dark[i];
+      else { const v=D[k][i]; col = v==null ? null : (k==="trans"||k==="seeing" ? FIVE : CLOUD)[v]; }
+      if(col){ g.fillStyle=col; g.fillRect(x0+c*pitch,y,cw,rh); } } });
+  const yEnd=y0+rows.length*rp;
+  for(let c=0;c<COLS;c++){ const i=s+c; if(i>=N) break; const LL=local(i), x=x0+c*pitch;
+    if(LL.h===0){ g.fillStyle=C.mid; g.fillRect(x-1,y0-4,1.5,yEnd-y0+6); text(DOW[LL.dow],x,yEnd+14,13,C.fg,700,"center"); }
+    else if(LL.h%6===0) text(String(LL.h).padStart(2,"0"),x+cw/2,yEnd+14,13,C.muted,500,"center"); }
+  const xn=x0+(now-s)*pitch+cw/2;
+  g.fillStyle=C.now; g.beginPath(); g.moveTo(xn-5,y0-11); g.lineTo(xn+5,y0-11); g.lineTo(xn,y0-4); g.fill();
+  g.fillStyle="#ffffff40"; g.fillRect(xn-.5,y0-4,1,yEnd-y0+3);
+
+  // bottom panels
+  const py=384, ph=84;
+  card(10,py,226,ph);
+  text("TONIGHT ON THE GROUND",24,py+22,12,C.muted,600);
+  if(tn){
+    const humTop=HUM_LO[a.hum]+5, dew=humTop>=85;
+    text(`Humidity up to ${humTop}%`,24,py+48,17,dew?C.maybe:C.fg,600);
+    text(dew?"Dew risk: run the heaters":`Wind ${WIND_KMH[a.wind]} km/h`,24,py+70,14,C.muted,500);
+  } else text("No forecast",24,py+48,17,C.muted,600);
+
+  card(244,py,226,ph);
+  text("SETUP REMINDER",258,py+22,12,C.muted,600);
+  const nightAhead = tn && tn.s>now;
+  const remindIdx = nightAhead ? (()=>{ for(let i=now;i<tn.s;i++) if(local(i).h===REMIND_HOUR) return i; return null; })() : null;
+  let r1, r2, rc=C.fg, bell=false;
+  if(!tn){ r1="Nothing scheduled"; r2=""; rc=C.muted; }
+  else if(!nightAhead){ r1="Night under way"; r2=a.word==="GO" ? "Rigs should be running" : "Nothing to do"; rc=C.muted; }
+  else if(a.word==="NO"){ r1="No chime tonight"; r2="Not worth setting up"; rc=C.muted; }
+  else if(local(now).h===REMIND_HOUR){ r1="Set up the rigs now"; r2=a.l1; rc=a.color; bell=true; }
+  else if(remindIdx!=null){ r1=`Chime at ${hh(remindIdx)}`; r2=a.word==="GO" ? "Tonight looks good" : "Tonight is a maybe"; rc=a.color; }
+  else { r1=`Dark at ${hh(tn.s)}`; r2=a.word==="GO" ? "Set up now if not done" : "Tonight is a maybe"; rc=a.color; }
+  if(bell){ led(452,py+20,6,rc,true); }
+  text(r1,258,py+48,17,rc,600);
+  text(r2,258,py+70,14,C.muted,500);
+
+  document.getElementById("tout").textContent = `${DOW[L.dow][0]+DOW[L.dow].slice(1).toLowerCase()} ${L.day} Nov, ${hh(now)}`;
+}
+
+const t=document.getElementById("t"); t.max=N-1;
+t.addEventListener("input",draw);
+document.querySelectorAll(".jump button").forEach(b=>b.addEventListener("click",()=>{t.value=b.dataset.h; draw();}));
+document.getElementById("night").addEventListener("change",e=>cv.classList.toggle("night",e.target.checked));
+draw();
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(draw);
+</script>

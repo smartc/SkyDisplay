@@ -1,0 +1,20 @@
+# Kept locally, never committed:
+# - factory firmware backup (16 MB, device-specific)
+backup/
+# - sample chart data (the chart image shows the site's coordinates)
+data/
+# - working screenshots from the device (show network details, chart and station IDs)
+firmware/screenshot-*.png
+*.raw
+
+# Build output
+build/
+*.bin
+*.elf
+*.map
+
+# Editors / OS
+.vscode/
+.DS_Store
+Thumbs.db
+__pycache__/

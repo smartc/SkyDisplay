@@ -1,0 +1,3 @@
+Copied from AnimatedGIF 2.2.0 by Larry Bank (Apache-2.0, see LICENSE).
+Only change: MAX_WIDTH raised from 480 to 1400 in AnimatedGIF.h so the 1312 px chart GIF decodes.
+gif.inl renamed to gif_impl.h (Arduino does not copy .inl files into the build).

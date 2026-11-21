@@ -1,0 +1,222 @@
+<title>SkyDisplay Weather Screen</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: the device screen is the hero, scenario switch under it, then field mapping and polling notes. Single dark look on purpose: it matches the device. */
+:root{
+  --bg:#070a12; --panel:#0e1320; --line:#1f2840; --fg:#dfe6f2; --muted:#9aa6bd; --accent:#6fb6ff;
+  --f-screen:"Barlow Semi Condensed","Arial Narrow",sans-serif; --f-body:"Inter",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+.wrap{max-width:860px;margin:0 auto;display:grid;gap:26px}
+h1{font-family:var(--f-screen);font-weight:700;font-size:2rem;margin:0;letter-spacing:.01em;text-wrap:balance}
+h2{font-family:var(--f-screen);font-weight:600;font-size:1.25rem;margin:0 0 10px;letter-spacing:.01em}
+.lede{color:var(--muted);margin:6px 0 0;max-width:64ch}
+.device{background:linear-gradient(#141a26,#0b0f18);border:1px solid var(--line);border-radius:22px;padding:clamp(10px,3vw,26px);
+  box-shadow:0 30px 60px -30px #000, inset 0 1px 0 #ffffff10}
+.screen{display:block;width:100%;max-width:720px;margin:0 auto;aspect-ratio:3/2;border-radius:4px;background:#000}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.seg button{font:inherit;font-size:.85rem;background:transparent;color:var(--muted);border:0;padding:6px 14px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:#1b2742;color:var(--fg)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.note{color:var(--muted);font-size:.85rem}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;min-width:0}
+.card p,.card li{color:#c3cbe0;font-size:.9rem;margin:0}
+.card ul{margin:0;padding-left:18px;display:grid;gap:6px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.84rem}
+td,th{text-align:left;padding:5px 10px 5px 0;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500}
+code{font-size:.82em;color:var(--accent);word-break:break-all}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>SkyDisplay Weather Screen</h1>
+    <p class="lede">Proposed third screen for the WT32-SC01 Plus, fed by Weather Underground a personal weather station. Swipe order on the device: forecast, weather, status. The values shown are examples, not live readings.</p>
+  </header>
+
+  <div class="device"><canvas id="scr" class="screen" width="480" height="320" role="img" aria-label="Mockup of the 480 by 320 weather screen"></canvas></div>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Example conditions">
+      <button type="button" id="sc0" aria-pressed="true">Cloudy, damp evening</button>
+      <button type="button" id="sc1" aria-pressed="false">Clear, cold night</button>
+    </div>
+    <span class="note">Amber marks something that matters for the rigs: dew risk, gusts, or a stale station.</span>
+  </div>
+
+  <div class="cols">
+    <section class="card">
+      <h2>What's on the screen</h2>
+      <ul>
+        <li><b>Outside now:</b> temperature, feels-like, change over the last hour, and a 24-hour temperature and dew point trace.</li>
+        <li><b>Dew point and spread:</b> the gap between temperature and dew point. Under 3 °C it turns amber: dew heaters on.</li>
+        <li><b>Wind:</b> speed, gust and direction. Gusts over 30 km/h turn amber.</li>
+        <li><b>Pressure</b> with its 3-hour trend, plus rain today.</li>
+        <li><b>Cloud tonight:</b> from the Weather Underground forecast, as a second opinion next to the Clear Sky Chart.</li>
+        <li><b>Five-day strip:</b> tonight and the next four days, with highs, lows, chance of precipitation and night cloud cover.</li>
+      </ul>
+    </section>
+    <section class="card">
+      <h2>Polling, within the free key's limits</h2>
+      <ul>
+        <li>Current observations every 5 minutes: 288 calls a day.</li>
+        <li>Last 24 hours (for the trace and trends) every 15 minutes: 96 a day.</li>
+        <li>5-day forecast every hour: 24 a day.</li>
+        <li>About 410 calls a day in total. A personal weather station key allows 1,500 a day and 30 a minute.</li>
+        <li>Station ID, API key and units go on the settings page. The key is stored on the device and never shown in full.</li>
+      </ul>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Field mapping</h2>
+    <div class="scroll">
+      <table>
+        <tr><th>On screen</th><th>API call</th><th>Field (units=m)</th></tr>
+        <tr><td>Temperature, feels like</td><td>observations/current</td><td><code>metric.temp</code>, <code>metric.windChill</code> or <code>metric.heatIndex</code></td></tr>
+        <tr><td>Humidity, dew point</td><td>observations/current</td><td><code>humidity</code>, <code>metric.dewpt</code></td></tr>
+        <tr><td>Wind</td><td>observations/current</td><td><code>metric.windSpeed</code>, <code>metric.windGust</code>, <code>winddir</code></td></tr>
+        <tr><td>Pressure, rain today</td><td>observations/current</td><td><code>metric.pressure</code>, <code>metric.precipTotal</code></td></tr>
+        <tr><td>Station age</td><td>observations/current</td><td><code>obsTimeUtc</code></td></tr>
+        <tr><td>24-hour trace, trends</td><td>observations/all/1day</td><td><code>metric.tempAvg</code>, <code>metric.dewptAvg</code>, <code>metric.pressureMax</code> per 5 min</td></tr>
+        <tr><td>Five-day strip</td><td>forecast/daily/5day</td><td><code>dayOfWeek</code>, <code>calendarDayTemperatureMax/Min</code>, <code>daypart[0].precipChance</code>, <code>.cloudCover</code>, <code>.iconCode</code></td></tr>
+      </table>
+    </div>
+    <p class="note" style="margin-top:10px">Endpoints: <code>api.weather.com/v2/pws/observations/current?stationId=STATION</code>, <code>/v2/pws/observations/all/1day</code>, and <code>/v3/wx/forecast/daily/5day?geocode=LAT,LON</code> using the location already in the display's settings.</p>
+  </section>
+</div>
+
+<script>
+const C = {bg:"#04060b", tile:"#0c111c", line:"#1b2337", fg:"#e6ecf7", muted:"#9aa6bd", idle:"#5b6577",
+  warn:"#ffb43d", go:"#3ddc84", no:"#ff5a5a", temp:"#ffd27a", dew:"#6fb6ff", cloud:"#c9d2e3", sun:"#ffd166", moon:"#e8e4d0", snow:"#ffffff"};
+
+// Two example scenarios. Shapes match the API responses; values are made up.
+const SCENARIOS = [
+  { time:"FRI 20 NOV   17:32", age:"STATION, 3 min ago", stale:false,
+    temp:-3.4, feels:-8.1, change:-1.2, hum:86, dew:-5.6, wind:12, gust:19, dir:315, pres:1018.4, presTrend:+1.6, rain:0.0, cloudTonight:85,
+    trace:{t:[-1.8,-2.4,-3.1,-3.6,-4.0,-4.2,-4.5,-4.3,-3.2,-1.4,0.2,1.3,1.8,1.9,1.5,0.6,-0.6,-1.9,-2.8,-3.0,-3.1,-3.2,-3.3,-3.4],
+           d:[-6.0,-6.1,-6.3,-6.4,-6.6,-6.6,-6.8,-6.8,-6.5,-6.0,-5.7,-5.5,-5.4,-5.4,-5.5,-5.6,-5.7,-5.8,-5.7,-5.6,-5.6,-5.6,-5.6,-5.6]},
+    days:[{d:"TONIGHT",hi:null,lo:-9,pop:20,cloud:85,icon:"cloud-night"},{d:"SAT",hi:-1,lo:-11,pop:10,cloud:40,icon:"partly-night"},
+          {d:"SUN",hi:2,lo:-8,pop:0,cloud:10,icon:"clear-night"},{d:"MON",hi:4,lo:-6,pop:30,cloud:70,icon:"cloud-night"},
+          {d:"TUE",hi:-2,lo:-12,pop:60,cloud:95,icon:"snow"}]},
+  { time:"SUN 22 NOV   22:10", age:"STATION, 2 min ago", stale:false,
+    temp:-11.2, feels:-11.2, change:-0.8, hum:68, dew:-16.1, wind:2, gust:5, dir:200, pres:1027.9, presTrend:+0.4, rain:0.0, cloudTonight:8,
+    trace:{t:[-6,-7,-7.5,-8,-8.6,-9,-9.2,-9.5,-8,-5,-2.5,-0.5,0.8,1.6,1.8,1.2,-1.0,-3.5,-5.6,-7.2,-8.4,-9.6,-10.4,-11.2],
+           d:[-13,-13.2,-13.4,-13.6,-13.8,-14,-14.1,-14.2,-14.3,-14.1,-14,-13.9,-14,-14.2,-14.4,-14.7,-15,-15.3,-15.5,-15.7,-15.8,-15.9,-16.0,-16.1]},
+    days:[{d:"TONIGHT",hi:null,lo:-15,pop:0,cloud:8,icon:"clear-night"},{d:"MON",hi:4,lo:-6,pop:30,cloud:70,icon:"cloud-night"},
+          {d:"TUE",hi:-2,lo:-12,pop:60,cloud:95,icon:"snow"},{d:"WED",hi:-5,lo:-14,pop:20,cloud:30,icon:"partly-night"},
+          {d:"THU",hi:-3,lo:-13,pop:10,cloud:15,icon:"clear-night"}]}
+];
+
+const cv = document.getElementById("scr"), g = cv.getContext("2d");
+const S = 3; cv.width = 480*S; cv.height = 320*S; g.scale(S,S);
+const F = '"Barlow Semi Condensed","Arial Narrow",sans-serif';
+// Draws text; if maxW is given, steps the size down until it fits (the device does the same by picking a smaller font).
+function text(s,x,y,size,col,weight=600,align="left",maxW=0){
+  g.font=`${weight} ${size}px ${F}`;
+  while(maxW && size>11 && g.measureText(s).width>maxW){ size-=1; g.font=`${weight} ${size}px ${F}`; }
+  g.fillStyle=col; g.textAlign=align; g.textBaseline="alphabetic"; g.fillText(s,x,y);
+  return g.measureText(s).width;
+}
+function rr(x,y,w,h,r,fill,stroke){ g.beginPath(); g.roundRect(x,y,w,h,r); if(fill){g.fillStyle=fill; g.fill();} if(stroke){g.strokeStyle=stroke; g.lineWidth=1; g.stroke();} }
+const deg = v => (v<0?"−":"") + Math.abs(v).toFixed(1) + "°";
+const degi = v => (v<0?"−":"") + Math.abs(Math.round(v)) + "°";
+const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+
+function header(s){
+  text(s.time,12,22,21,C.fg,600);
+  [0,1,2].forEach(k=>{ g.fillStyle = k===1?C.fg:C.idle; g.beginPath(); g.arc(229+k*14,15,k===1?4:3,0,7); g.fill(); });
+  text(s.age,468,22,18,s.stale?C.warn:C.muted,500,"right",200);
+}
+
+function sparkline(x,y,w,h,tr){
+  const all=[...tr.t,...tr.d], lo=Math.min(...all)-0.5, hi=Math.max(...all)+0.5;
+  const px=i=>x+i*(w/(tr.t.length-1)), py=v=>y+h-(v-lo)/(hi-lo)*h;
+  // zero line if in range
+  if(lo<0&&hi>0){ g.strokeStyle="#2a3346"; g.setLineDash([2,3]); g.beginPath(); g.moveTo(x,py(0)); g.lineTo(x+w,py(0)); g.stroke(); g.setLineDash([]); }
+  // dew-point gap fill
+  g.fillStyle="#6fb6ff14"; g.beginPath(); tr.t.forEach((v,i)=>i?g.lineTo(px(i),py(v)):g.moveTo(px(i),py(v)));
+  for(let i=tr.d.length-1;i>=0;i--) g.lineTo(px(i),py(tr.d[i])); g.closePath(); g.fill();
+  [[tr.d,C.dew],[tr.t,C.temp]].forEach(([arr,col])=>{ g.strokeStyle=col; g.lineWidth=1.6; g.beginPath(); arr.forEach((v,i)=>i?g.lineTo(px(i),py(v)):g.moveTo(px(i),py(v))); g.stroke(); });
+  g.fillStyle=C.temp; g.beginPath(); g.arc(px(tr.t.length-1),py(tr.t.at(-1)),2.6,0,7); g.fill();
+}
+
+// One reading in the grid: label, value, sub-line, each kept inside the cell width.
+const CELL_W = 104;
+function reading(x,y,label,value,sub,warn,subWarn){
+  text(label,x,y+12,14,C.muted,600,"left",CELL_W);
+  const vw = text(value,x,y+33,20,warn?C.warn:C.fg,600,"left",CELL_W);
+  if(sub) text(sub,x,y+49,14,(subWarn??warn)?C.warn:C.muted,500,"left",CELL_W);
+  return vw;
+}
+
+function windArrow(cx,cy,dir){  // arrow points the way the wind blows toward
+  const a=(dir+180)*Math.PI/180; g.save(); g.translate(cx,cy); g.rotate(a);
+  g.fillStyle=C.fg; g.beginPath(); g.moveTo(0,-8); g.lineTo(5,5); g.lineTo(0,2); g.lineTo(-5,5); g.closePath(); g.fill(); g.restore();
+}
+
+function icon(kind,cx,cy){
+  const cloud=(x,y,s,col)=>{ g.fillStyle=col; [[0,0,7],[-7,3,5],[7,3,5],[3,-4,5]].forEach(([dx,dy,r])=>{g.beginPath(); g.arc(x+dx*s,y+dy*s,r*s,0,7); g.fill();}); g.fillRect(x-7*s,y+2*s,14*s,6*s); };
+  const moon=(x,y,r)=>{ g.fillStyle=C.moon; g.beginPath(); g.arc(x,y,r,0,7); g.fill(); g.fillStyle=C.tile; g.beginPath(); g.arc(x+r*0.5,y-r*0.35,r*0.85,0,7); g.fill(); };
+  if(kind==="clear-night") moon(cx,cy,9);
+  else if(kind==="partly-night"){ moon(cx-4,cy-4,8); cloud(cx+3,cy+3,0.85,C.cloud); }
+  else if(kind==="cloud-night") cloud(cx,cy,1.05,C.cloud);
+  else if(kind==="snow"){ cloud(cx,cy-3,0.95,C.cloud); g.fillStyle=C.snow; [[-6,11],[0,13],[6,11]].forEach(([dx,dy])=>{g.beginPath(); g.arc(cx+dx,cy+dy,1.6,0,7); g.fill();}); }
+}
+
+function draw(s){
+  g.fillStyle=C.bg; g.fillRect(0,0,480,320);
+  header(s);
+
+  // Outside now
+  rr(12,32,198,158,10,C.tile,C.line);
+  text("OUTSIDE NOW",24,52,14,C.muted,600);
+  text(deg(s.temp),22,96,48,C.fg,700);
+  const ch = s.change, arrow = ch<0?"▼":"▲";
+  text(`Feels ${degi(s.feels)}   ${arrow} ${Math.abs(ch).toFixed(1)}° in 1 h`,24,118,16,C.muted,500,"left",174);
+  sparkline(24,130,174,38,s.trace);
+  text("24 h",24,183,12,C.idle,500); text("temp",86,183,12,C.temp,600); text("dew point",116,183,12,C.dew,600);
+
+  // Readings grid: 2 columns x 3 rows
+  rr(220,32,248,158,10,C.tile,C.line);
+  const spread = s.temp - s.dew, dewWarn = spread < 3;
+  reading(232,36,"HUMIDITY",`${s.hum}%`,`Rain ${s.rain.toFixed(1)} mm today`,false);
+  reading(352,36,"DEW POINT",deg(s.dew),dewWarn?`Dew risk, ${spread.toFixed(1)}° spread`:`${spread.toFixed(1)}° spread`,dewWarn);
+  const gustWarn = s.gust > 30;
+  const ww = reading(232,94,"WIND",`${s.wind} km/h`,`${COMPASS[Math.round(s.dir/22.5)%16]}, gust ${s.gust}`,false,gustWarn);
+  windArrow(232+ww+12,121,s.dir);
+  const pt = s.presTrend, pa = Math.abs(pt)<0.5?"steady":(pt>0?"rising":"falling");
+  reading(352,94,"PRESSURE",`${s.pres.toFixed(1)}`,`hPa, ${pa}`,false);
+  const cloudCol = s.cloudTonight<=30?C.go:s.cloudTonight<=60?C.warn:C.no;
+  text("CLOUD TONIGHT (WU)",232,161,14,C.muted,600,"left",180);
+  rr(232,168,224,10,5,"#1a2234"); rr(232,168,Math.max(10,224*s.cloudTonight/100),10,5,cloudCol);
+  text(`${s.cloudTonight}%`,456,161,15,C.fg,600,"right");
+
+  // Five-day strip
+  const x0=12, w=(468-x0)/5, y0=198;
+  s.days.forEach((d,k)=>{
+    const x=x0+k*w;
+    rr(x+2,y0,w-4,114,9,k===0?"#111a2b":C.tile,C.line);
+    text(d.d,x+w/2,y0+20,14,k===0?C.fg:C.muted,600,"center");
+    icon(d.icon,x+w/2,y0+42);
+    text(d.hi==null?`Low ${degi(d.lo)}`:`${degi(d.hi)} / ${degi(d.lo)}`,x+w/2,y0+76,17,C.fg,600,"center",w-14);
+    text(`${d.pop}% precip`,x+w/2,y0+93,14,d.pop>=50?C.warn:C.muted,500,"center",w-14);
+    text(`${d.cloud}% cloud`,x+w/2,y0+108,14,C.muted,500,"center",w-14);
+  });
+}
+
+let cur=0;
+function set(k){ cur=k; [0,1].forEach(i=>document.getElementById("sc"+i).setAttribute("aria-pressed", String(i===k))); draw(SCENARIOS[k]); }
+document.getElementById("sc0").addEventListener("click",()=>set(0));
+document.getElementById("sc1").addEventListener("click",()=>set(1));
+set(0);
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(()=>draw(SCENARIOS[cur]));
+</script>
