@@ -7,6 +7,9 @@ data/
 firmware/screenshot-*.png
 *.raw
 
+# - personal design log
+NOTES.md
+
 # Build output
 build/
 *.bin

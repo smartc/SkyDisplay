@@ -57,8 +57,6 @@ Tools (Python 3 with Pillow):
 2. Open the settings page (`http://skydisplay.local/`, or the IP shown on the status screen) and set the
    Clear Sky Chart URL, time zone, NTP servers and, optionally, your Weather Underground station and key.
 
-`NOTES.md` has the design notes: chart decoding, scoring rules, and the problems found along the way.
-
 ## Limitations
 
 - HTTPS certificates are not verified yet (the chart site and the weather API are reached with TLS, unverified).
