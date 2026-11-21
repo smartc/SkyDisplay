@@ -69,7 +69,8 @@ Tools (Python 3 with Pillow):
 
 ## License
 
-MIT, see `LICENSE`. The third-party parts below keep their own licences.
+MIT, see `LICENSE`. That covers this project's own code; the third-party parts below keep their own licences
+and are not covered by it.
 
 ## Third-party
 
