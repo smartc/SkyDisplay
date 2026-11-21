@@ -210,6 +210,7 @@ static void drawFooter(const UiState& s, const Forecast& f, const Night* tn, con
 }
 
 void uiDraw(const UiState& s) {
+  if (s.needsSetup) { uiFirstRunScreen(s); return; }
   spr.fillScreen(c565(C_BG));
   header(s);
   const Forecast* f = s.f;
@@ -481,6 +482,50 @@ void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const S
     if (d.pop >= 0) { snprintf(b, sizeof b, "%d%% precip", d.pop); text(b, cx, y0 + 93, fSmall, d.pop >= 50 ? C_MAYBE : C_MUTED, baseline_center, cw - 10); }
     if (d.cloud >= 0) { snprintf(b, sizeof b, "%d%% cloud", d.cloud); text(b, cx, y0 + 108, fSmall, C_MUTED, baseline_center, cw - 10); }
   }
+  spr.pushSprite(0, 0);
+}
+
+// ---------- setup screens ----------
+static void qrPanel(int x, int y, int size, const char* data) {
+  spr.fillRoundRect(x - 8, y - 8, size + 16, size + 16, 10, TFT_WHITE);
+  spr.qrcode(data, x, y, size, 3);
+}
+
+// Escape ; , : \ and " for the WIFI: QR format.
+static String wifiQrEscape(const char* s) {
+  String o;
+  for (; *s; s++) { if (strchr(";,:\\\"", *s)) o += '\\'; o += *s; }
+  return o;
+}
+
+void uiWifiSetupScreen(const char* apName, const String& setupUrl) {
+  spr.fillScreen(c565(C_BG));
+  text("Wi-Fi setup", W / 2, 10, fTitle, C_FG, top_center);
+  const int qs = 132, y = 62;
+  const int x1 = 120 - qs / 2, x2 = 360 - qs / 2;
+  String wifi = "WIFI:T:nopass;S:" + wifiQrEscape(apName) + ";;";
+  qrPanel(x1, y, qs, wifi.c_str());
+  qrPanel(x2, y, qs, setupUrl.c_str());
+  text("1. Join the setup network", 120, 214, fBodyB, C_FG, top_center, 220);
+  text(apName, 120, 240, fBody, C_MUTED, top_center, 220);
+  text("2. Open the setup page", 360, 214, fBodyB, C_FG, top_center, 220);
+  text(setupUrl.c_str(), 360, 240, fBody, C_MUTED, top_center, 220);
+  text("Scan with your phone camera. The page often opens after step 1.", W / 2, 288, fSmall, C_IDLE, top_center, W - 24);
+  spr.pushSprite(0, 0);
+}
+
+void uiFirstRunScreen(const UiState& s) {
+  spr.fillScreen(c565(C_BG));
+  header(s);
+  const int qs = 150, qx = W - 24 - qs, qy = 70;
+  qrPanel(qx, qy, qs, s.settingsUrl.c_str());
+  text("Almost there", 24, 64, fTitle, C_FG, top_left);
+  text("Wi-Fi is connected. Scan the code", 24, 112, fBody, C_MUTED, top_left, qx - 40);
+  text("to open the settings page, then", 24, 138, fBody, C_MUTED, top_left, qx - 40);
+  text("add your Clear Sky Chart link", 24, 164, fBody, C_MUTED, top_left, qx - 40);
+  text("and your time zone.", 24, 190, fBody, C_MUTED, top_left, qx - 40);
+  text(s.settingsUrl.c_str(), 24, 232, fBodyB, C_FG, top_left, qx - 40);
+  text("Settings", qx + qs / 2, qy + qs + 16, fSmall, C_MUTED, top_center);
   spr.pushSprite(0, 0);
 }
 

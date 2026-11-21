@@ -19,6 +19,7 @@
 #include "ui.h"
 #include "web.h"
 #include "weather.h"
+#include "tls.h"
 
 static Forecast fc;
 static UiState ui;
@@ -85,6 +86,8 @@ static void buildStatus(StatusInfo& st) {
 
 static void drawScreen() {
   ui.nowUtc = nowUtc();
+  ui.needsSetup = !chartTarget().ok;  // fresh device: show the first-run QR code instead of the forecast
+  ui.settingsUrl = "http://" + WiFi.localIP().toString() + "/";
   if (ui.screen == SCREEN_STATUS) { StatusInfo st; buildStatus(st); uiDrawStatus(ui, st); }
   else if (ui.screen == SCREEN_WEATHER) uiDrawWeather(ui, wx, weatherConfigured(), "http://" + WiFi.localIP().toString() + "/");
   else uiDraw(ui);
@@ -97,10 +100,14 @@ static volatile bool redrawNeeded = false;      // set by the network task when 
 static time_t nowUtc() { time_t t = time(nullptr); return t > 1700000000 ? t : 0; }
 
 static void onPortal(WiFiManager*) {
-  uiMessage("Wi-Fi setup",
-            "Join the Wi-Fi network \"" SETUP_AP_NAME "\" from a phone or laptop,",
-            "then browse to http://192.168.4.1",
-            "and pick your network.");
+  // Hand out the setup network's own address as the DNS server. Without this (esp32 core 3.x only offers DNS
+  // when one is passed explicitly, and WiFiManager doesn't), phones can't resolve their connectivity-check host,
+  // decide the network has "no internet" instead of a sign-in page, and send browser traffic over mobile data.
+  // With it, WiFiManager's catch-all DNS answers the check and the phone shows its "Sign in to network" page.
+  // This runs before WiFiManager starts its DNS and web servers.
+  IPAddress ip(192, 168, 4, 1), mask(255, 255, 255, 0), leaseStart(192, 168, 4, 2);
+  if (!WiFi.softAPConfig(ip, ip, mask, leaseStart, ip)) Serial.println("[main] setup AP DNS config failed");
+  uiWifiSetupScreen(SETUP_AP_NAME, "http://" + WiFi.softAPIP().toString() + "/");
 }
 
 // ---------- clock: NTP keeps running in the background and re-syncs every cfg.ntpHours ----------
@@ -269,6 +276,15 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(cfg.hostname.c_str());
   WiFiManager wm;
+  wm.setDebugOutput(true, WM_DEBUG_VERBOSE);  // logs each request the setup page receives
+  // Log devices joining the setup network and getting an address (diagnoses phones that can't open the page).
+  WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t info) {
+    const uint8_t* m = info.wifi_ap_staconnected.mac;
+    Serial.printf("[setup] device joined setup network: %02x:%02x:%02x:..\n", m[0], m[1], m[2]);
+  }, ARDUINO_EVENT_WIFI_AP_STACONNECTED);
+  WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t info) {
+    Serial.printf("[setup] gave address %s to a device\n", IPAddress(info.wifi_ap_staipassigned.ip.addr).toString().c_str());
+  }, ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED);
   wm.setAPCallback(onPortal);
   wm.setConnectTimeout(20);
   wm.setHostname(cfg.hostname.c_str());
@@ -287,6 +303,7 @@ void setup() {
   Serial.printf("[main] clock %s, NTP re-sync every %u h\n", nowUtc() ? "set" : "NOT set yet", (unsigned)(sntp_get_sync_interval() / 3600000UL));
 
   webBegin({webCheckNow, webApply, webStatus});
+  httpsBegin(cfg.hostname);  // HTTPS location page for "Use my location" (browsers need HTTPS for GPS)
   ui.f = &fc;
   lastTouchMs = millis();
   // Network work (chart + weather) on core 0, so drawing and touch on core 1 never wait for it.
@@ -318,6 +335,9 @@ void loop() {
     else if (c == 'a') printSky();
     else if (c == 'n') { ui.screen = (ui.screen + 1) % SCREEN_COUNT; lastTouchMs = millis(); drawScreen(); }  // next screen (testing)
     else if (c >= '0' && c <= '2') { ui.screen = c - '0'; lastTouchMs = millis(); drawScreen(); }      // jump to a screen (testing)
+    // Previews of the setup screens (testing); the next redraw returns to normal.
+    else if (c == 'q') { uiWifiSetupScreen(SETUP_AP_NAME, "http://192.168.4.1/"); nextDrawMs = millis() + 15000; }
+    else if (c == 'Q') { UiState p = ui; p.nowUtc = nowUtc(); p.settingsUrl = "http://" + WiFi.localIP().toString() + "/"; uiFirstRunScreen(p); nextDrawMs = millis() + 15000; }
     else if (c == 'i') {
       Serial.printf("[info] fw %s now %ld start %ld cols %d problem '%s' backlight %d ip %s heap %u (min %u) psram free %u, slowest draw %u ms, slowest loop pass %u ms\n",
                     FIRMWARE_VERSION, (long)nowUtc(), (long)fc.startUtc, fc.n, ui.problem.c_str(), currentBacklight,

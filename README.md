@@ -53,15 +53,22 @@ Tools (Python 3 with Pillow):
 
 ## First run
 
-1. With no Wi-Fi saved, the display opens a `SkyDisplay-Setup` network. Join it and pick your network.
-2. Open the settings page (`http://skydisplay.local/`, or the IP shown on the status screen) and set the
-   Clear Sky Chart URL, time zone, NTP servers and, optionally, your Weather Underground station and key.
+1. With no Wi-Fi saved, the display opens a `SkyDisplay-Setup` network and shows two QR codes: one joins that
+   network from a phone camera, the other opens the setup page (`http://192.168.4.1/`). Pick your Wi-Fi network there.
+2. Once connected, the display shows a QR code for its settings page (`http://skydisplay.local/`, or its IP).
+   Enter your Clear Sky Chart ID (e.g. `abcde` from `https://cds.darkdragonsastro.com/g/abcde.html`; the full link
+   works too), your time zone and NTP servers and, optionally, your Weather Underground station and key.
+3. Latitude and longitude come from the chart by default. **Use my location** on the settings page fills them in
+   from your phone's GPS instead (see Limitations about the certificate warning).
 
 ## Limitations
 
 - HTTPS certificates are not verified yet (the chart site and the weather API are reached with TLS, unverified).
 - The settings page is plain HTTP on your local network, with an optional password (user `admin`). Keep the display
   on a trusted network.
+- Browsers only share GPS location with HTTPS pages, so **Use my location** opens a small page the display serves
+  over HTTPS (port 443) with a self-signed certificate it generates at first boot (ECDSA P-256, stored on the device;
+  no key is in this repository). Expect a one-time "connection not private" warning to click through.
 - The Weather Underground API key is stored in the device's flash. It is never shown on the page or in logs.
 - Chart decoding depends on the chart's current pixel layout.
 

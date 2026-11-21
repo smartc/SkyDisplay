@@ -12,6 +12,8 @@ struct UiState {
   bool skyValid = false;    // false until we have a location
   int footerPage = 0;       // which footer page to show
   int screen = 0;           // Screen enum below; 0 = forecast
+  bool needsSetup = false;  // no chart configured yet: forecast screen shows the first-run QR code
+  String settingsUrl;       // e.g. http://192.168.1.50/ (the display's address)
 };
 
 static const int FOOTER_PAGES = 3;
@@ -33,6 +35,10 @@ void uiDraw(const UiState& s);                           // forecast screen
 void uiDrawStatus(const UiState& s, const StatusInfo& st); // status screen
 // Weather screen. settingsUrl is shown when the station or key isn't set up yet.
 void uiDrawWeather(const UiState& s, const Weather& w, bool configured, const String& settingsUrl);
+// Wi-Fi setup: QR code to join the setup network (open, no password) and QR code for the setup page.
+void uiWifiSetupScreen(const char* apName, const String& setupUrl);
+// First run after Wi-Fi: QR code for the settings page, to add the chart and time zone.
+void uiFirstRunScreen(const UiState& s);
 // Full-screen message (setup, connecting, errors before the first chart).
 void uiMessage(const char* title, const char* line1, const char* line2 = "", const char* line3 = "");
 enum TouchEvent { TOUCH_NONE, TOUCH_TAP, TOUCH_LONG, TOUCH_SWIPE_LEFT, TOUCH_SWIPE_RIGHT };

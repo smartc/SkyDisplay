@@ -87,10 +87,20 @@ ChartTarget chartTarget() {
     int g = rest.indexOf("/g/");
     if (g < 0) return t;
     key = rest.substring(g + 3);
-  } else key = u;  // just the chart ID
+  } else {
+    // Just the chart ID, or a partial path like "/g/abcde" or "g/abcde.html".
+    key = u;
+    int g = key.indexOf("g/");
+    if (g >= 0 && (g == 0 || key[g - 1] == '/')) key = key.substring(g + 2);
+    while (key.startsWith("/")) key = key.substring(1);
+  }
   int cut = key.indexOf('.'); if (cut >= 0) key = key.substring(0, cut);
   cut = key.indexOf('/'); if (cut >= 0) key = key.substring(0, cut);
   cut = key.indexOf('?'); if (cut >= 0) key = key.substring(0, cut);
+  key.trim();
+  // Chart IDs are lower case and the server is case-sensitive; phone keyboards often capitalise.
+  key.toLowerCase();
+  host.toLowerCase();
   if (!key.length() || !host.length()) return t;
   t.host = host; t.key = key;
   t.pagePath = "/g/" + key + ".html";

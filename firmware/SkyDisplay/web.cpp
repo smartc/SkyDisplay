@@ -57,18 +57,35 @@ static void handleRoot() {
   if (server.hasArg("saved")) h += F("<section><b>Saved.</b> Changes are applied now.</section>");
 
   h += F("<form method='post' action='/save'><section><h2>Clear Sky Chart</h2><div class='grid'>"
-         "<label style='grid-column:1/-1'>Chart page URL or chart ID<input name='chartUrl' value='");
+         "<label style='grid-column:1/-1'>Chart ID or chart page URL<input name='chartUrl' autocapitalize='none' autocorrect='off' autocomplete='off' spellcheck='false' value='");
   h += esc(cfg.chartUrl);
-  h += F("'><span class='hint'>e.g. https://cds.darkdragonsastro.com/g/abcde.html</span></label>"
+  h += F("'><span class='hint'>The ID from your Dark Dragons chart link, e.g. abcde from https://cds.darkdragonsastro.com/g/abcde.html. A full link works too.</span></label>"
          "<label>Check every (minutes)<input type='number' min='10' max='240' name='poll' value='");
   h += String(cfg.pollMinutes);
   h += F("'></label></div></section>");
 
-  h += F("<section><h2>Location and time</h2><div class='grid'><label>Latitude<input name='lat' value='");
-  h += cfg.lat != 0 ? String(cfg.lat, 5) : "";
-  h += F("'></label><label>Longitude<input name='lon' value='");
-  h += cfg.lon != 0 ? String(cfg.lon, 5) : "";
+  // Coming back from the HTTPS location page: ?lat=&lon=&acc= pre-fills the fields (saved only on Save).
+  bool fromPhone = false; double pLat = 0, pLon = 0; int pAcc = -1;
+  if (server.hasArg("lat") && server.hasArg("lon")) {
+    pLat = server.arg("lat").toDouble(); pLon = server.arg("lon").toDouble();
+    pAcc = server.hasArg("acc") ? server.arg("acc").toInt() : -1;
+    fromPhone = pLat >= -90 && pLat <= 90 && pLon >= -180 && pLon <= 180 && !(pLat == 0 && pLon == 0);
+  }
+  h += F("<section><h2>Location and time</h2>");
+  if (fromPhone) {
+    h += "<p class='hint' style='color:var(--warn);margin:0 0 10px'>Filled in from your phone";
+    if (pAcc >= 0) h += " (accurate to about " + String(pAcc) + " m)";
+    h += F(". Press Save settings to keep it.</p>");
+  }
+  h += F("<div class='grid'><label>Latitude<input name='lat' inputmode='decimal' value='");
+  h += fromPhone ? String(pLat, 5) : (cfg.lat != 0 ? String(cfg.lat, 5) : "");
+  h += F("'></label><label>Longitude<input name='lon' inputmode='decimal' value='");
+  h += fromPhone ? String(pLon, 5) : (cfg.lon != 0 ? String(cfg.lon, 5) : "");
   h += F("'><span class='hint'>Leave both blank to use the chart's location.</span></label>"
+         "<div class='row' style='grid-column:1/-1'><a class='btn' id='locBtn' href='/locate'>Use my location</a>"
+         "<span class='hint'>Opens a secure page that asks your phone for its location. Expect a one-time"
+         " &quot;not private&quot; warning (the display's own certificate); continue past it.</span></div>"
+         "<script>document.getElementById('locBtn').href='https://'+location.hostname+'/locate';</script>"
          "<label>Time zone (POSIX)<input name='tz' list='tzs' value='");
   h += esc(cfg.tz);
   h += F("'><datalist id='tzs'><option value='&lt;-06&gt;6'>UTC-6 all year, no DST</option><option value='UTC0'>UTC</option>"
@@ -165,7 +182,10 @@ static void handleSave() {
   String oldUrl = cfg.chartUrl, oldTz = cfg.tz, oldN1 = cfg.ntp1, oldN2 = cfg.ntp2;
   int oldNtpHours = cfg.ntpHours;
   double oldLat = cfg.lat, oldLon = cfg.lon;
-  if (arg("chartUrl").length()) cfg.chartUrl = arg("chartUrl");
+  if (arg("chartUrl").length()) {
+    cfg.chartUrl = arg("chartUrl");
+    if (cfg.chartUrl.indexOf("://") < 0) cfg.chartUrl.toLowerCase();  // bare chart IDs are lower case
+  }
   cfg.pollMinutes = argInt("poll", 10, 240, cfg.pollMinutes);
   String la = arg("lat"), lo = arg("lon");
   if (la.length() && lo.length()) { cfg.lat = constrain(la.toDouble(), -90.0, 90.0); cfg.lon = constrain(lo.toDouble(), -180.0, 180.0); }
