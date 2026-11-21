@@ -151,7 +151,7 @@ static bool fetchForecast(Weather& w, double lat, double lon) {
   JsonDocument filter;
   filter["dayOfWeek"] = filter["calendarDayTemperatureMax"] = filter["temperatureMin"] = true;
   JsonObject dp = filter["daypart"][0].to<JsonObject>();
-  dp["cloudCover"] = dp["precipChance"] = dp["iconCode"] = true;
+  dp["cloudCover"] = dp["precipChance"] = dp["iconCode"] = dp["temperature"] = dp["narrative"] = true;
   JsonDocument doc(&psAlloc);
   char geo[48]; snprintf(geo, sizeof geo, "%.4f,%.4f", lat, lon);
   String url = base() + "/v3/wx/forecast/daily/5day?geocode=" + geo + "&format=json&units=m&language=en-US" + keyParam();
@@ -171,7 +171,23 @@ static bool fetchForecast(Weather& w, double lat, double lon) {
     d.cloud = isnan(cc) ? -1 : (int)lroundf(cc);
     d.pop = isnan(pp) ? -1 : (int)lroundf(pp);
     d.icon = isnan(ic) ? -1 : (int)lroundf(ic);
+    d.valid = true;
   }
+  // Today's daytime part (index 0). WU drops it (null) once the day is mostly over, from mid-afternoon.
+  WxDay& t = w.today;
+  t = WxDay();
+  strcpy(t.name, "TODAY");
+  float th = f(part["temperature"][0]), tc = f(part["cloudCover"][0]), tp = f(part["precipChance"][0]), ti = f(part["iconCode"][0]);
+  t.valid = !isnan(th) || !isnan(ti);
+  if (t.valid) {
+    t.hi = th;
+    t.cloud = isnan(tc) ? -1 : (int)lroundf(tc);
+    t.pop = isnan(tp) ? -1 : (int)lroundf(tp);
+    t.icon = isnan(ti) ? -1 : (int)lroundf(ti);
+  }
+  String dayText = part["narrative"][0] | "", nightText = part["narrative"][1] | "";
+  if (t.valid && dayText.length()) { w.forecastTitle = "TODAY"; w.forecastText = dayText; }
+  else { w.forecastTitle = "TONIGHT"; w.forecastText = nightText; }
   w.cloudTonight = w.days[0].cloud;
   w.haveForecast = true;
   logf("[wx] forecast: tonight cloud %d%%, low %.0f\n", w.cloudTonight, w.days[0].lo);

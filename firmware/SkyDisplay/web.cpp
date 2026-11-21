@@ -4,12 +4,14 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
-#include <HTTPUpdateServer.h>
+#include <ElegantOTA.h>
 #include <WiFiManager.h>
+#include "board.h"
+#include "ui.h"
 
 static WebServer server(80);
-static HTTPUpdateServer updater;
 static WebHooks hooks;
+static volatile bool updating = false;  // firmware upload in progress: the screen shows a message instead of redrawing
 
 static String esc(const String& s) {
   String o; o.reserve(s.length() + 8);
@@ -117,7 +119,9 @@ static void handleRoot() {
   h += String(cfg.nightTo);
   h += F("'></label><label>Footer rotation (seconds)<input type='number' min='2' max='30' name='footSec' value='");
   h += String(cfg.footerSeconds);
-  h += F("'></label></div></section>");
+  h += F("'></label><label>Start-up screen<select name='startScr'>");
+  h += opt(0, cfg.startScreen, "Forecast") + opt(1, cfg.startScreen, "Weather") + opt(2, cfg.startScreen, "Status");
+  h += F("</select><span class='hint'>Also where the display goes back to after 2 minutes untouched.</span></label></div></section>");
 
   h += F("<section><h2>Scoring</h2><div class='grid'><label>Good hour: cloud up to (%)<input type='number' min='0' max='60' name='goodCloud' value='");
   h += String(cfg.goodMaxCloud);
@@ -163,10 +167,32 @@ static void handleRoot() {
 
   h += F("<section><h2>Maintenance</h2><div class='row'>"
          "<form method='post' action='/check'><button type='submit'>Check chart and weather now</button></form>"
-         "<a class='btn' href='/update'>Update firmware</a>"
+         "<a class='btn' href='/firmware'>Update firmware</a>"
          "<form method='post' action='/restart'><button type='submit'>Restart</button></form></div>"
-         "<p class='hint'>Firmware " FIRMWARE_VERSION ". Update takes a .bin built by the Arduino IDE (Sketch &gt; Export Compiled Binary).</p></section>"
+         "<p class='hint'>Firmware " FIRMWARE_VERSION " for the " BOARD_NAME ".</p></section>"
          "</main></body></html>");
+  server.send(200, "text/html", h);
+}
+
+// Firmware update: our page layout, framing ElegantOTA's own page (/update) switched to its dark theme.
+// /update, /ota/start and /ota/upload still work on their own for scripts.
+static void handleFirmware() {
+  if (!authOk()) return;
+  String h; h.reserve(3500);
+  h += F("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>SkyDisplay firmware</title><style>");
+  h += FPSTR(CSS);
+  h += F("iframe{width:100%;height:480px;border:0;background:transparent;display:block}code{color:var(--fg)}</style></head><body><main>"
+         "<header><h1>Firmware update</h1><div class='status'>Running " FIRMWARE_VERSION " on the " BOARD_NAME ". <a href='/' style='color:var(--accent)'>Back to settings</a></div></header>"
+         "<section><p class='hint' style='margin:0 0 8px'>Upload a <code>.bin</code> built for the " BOARD_NAME
+         " (Arduino IDE: Sketch &gt; Export Compiled Binary, the file without &quot;merged&quot; in its name). Settings are kept. The display restarts when the upload finishes.</p>"
+         "<iframe id='ota' src='/update' title='Firmware upload' onload='otaLoaded()'></iframe></section></main><script>"
+         "try{localStorage.setItem('theme','dark')}catch(e){}"  // ElegantOTA reads this for its dark mode
+         // color-scheme must match ours, or Chromium paints an opaque white backdrop behind the frame
+         "function otaLoaded(){var f=document.getElementById('ota');try{var d=f.contentDocument;d.documentElement.classList.add('dark');"
+         "var st=d.createElement('style');st.textContent=':root{color-scheme:dark}html,body,body>div{background:transparent!important}';d.head.appendChild(st);}catch(e){}}"
+         "setInterval(function(){var f=document.getElementById('ota');try{var h=f.contentDocument.documentElement.scrollHeight;"
+         "if(h>100&&Math.abs(h-f.offsetHeight)>4)f.style.height=h+'px';}catch(e){}},500);"
+         "</script></body></html>");
   server.send(200, "text/html", h);
 }
 
@@ -202,6 +228,7 @@ static void handleSave() {
   cfg.nightFrom = argInt("nightFrom", 0, 23, cfg.nightFrom);
   cfg.nightTo = argInt("nightTo", 0, 23, cfg.nightTo);
   cfg.footerSeconds = argInt("footSec", 2, 30, cfg.footerSeconds);
+  cfg.startScreen = argInt("startScr", 0, 2, cfg.startScreen);
   cfg.goodMaxCloud = argInt("goodCloud", 0, 60, cfg.goodMaxCloud);
   cfg.goodMinTrans = argInt("goodTrans", 2, 5, cfg.goodMinTrans);
   cfg.goMinHours = argInt("goHours", 1, 12, cfg.goMinHours);
@@ -250,11 +277,36 @@ void webBegin(const WebHooks& h) {
   server.on("/forget", HTTP_POST, handleForget);
   server.on("/check", HTTP_POST, [] { if (!authOk()) return; hooks.checkNow(); redirect("/"); });
   server.on("/restart", HTTP_POST, [] { if (!authOk()) return; server.send(200, "text/plain", "Restarting..."); delay(500); ESP.restart(); });
-  // Firmware upload page. Uses the same password as the settings page (user admin), if one is set.
-  updater.setup(&server, "/update", cfg.webPassword.length() ? "admin" : "", cfg.webPassword.c_str());
+  // Firmware upload (ElegantOTA at /update, framed by /firmware). Same password as the settings page (user admin), if set.
+  server.on("/firmware", HTTP_GET, handleFirmware);
+  ElegantOTA.begin(&server);
+  if (cfg.webPassword.length()) ElegantOTA.setAuth("admin", cfg.webPassword.c_str());
+  ElegantOTA.onStart([] {
+    updating = true;
+    Serial.println("[ota] update started");
+    uiMessage("Updating firmware", "Receiving the new firmware...", "Keep the display plugged in.");
+#if BLANK_DURING_FLASH_WRITES
+    uiSetBacklight(0);  // the picture tears while flash is written; the browser shows the progress instead
+#endif
+  });
+  ElegantOTA.onProgress([](size_t done, size_t) {
+    static uint32_t lastLog = 0;
+    if (millis() - lastLog > 2000) { lastLog = millis(); Serial.printf("[ota] %u KB\n", (unsigned)(done / 1024)); }
+  });
+  ElegantOTA.onEnd([](bool ok) {
+    Serial.printf("[ota] update %s\n", ok ? "finished, restarting" : "FAILED");
+#if BLANK_DURING_FLASH_WRITES
+    // The panel's refresh lost its timing during the flash writes and only a restart puts it right,
+    // so restart either way (after a failure, the current firmware simply starts again).
+    if (!ok) ESP.restart();
+#endif
+    if (ok) uiMessage("Update finished", "Restarting...");
+    else { uiMessage("Update failed", "The current firmware is still installed."); updating = false; }
+  });
   server.onNotFound([] { server.send(404, "text/plain", "Not found"); });
   server.begin();
   Serial.printf("[web] settings at http://%s.local/ and http://%s/\n", cfg.hostname.c_str(), WiFi.localIP().toString().c_str());
 }
 
-void webLoop() { server.handleClient(); }
+void webLoop() { server.handleClient(); ElegantOTA.loop(); }
+bool webUpdating() { return updating; }

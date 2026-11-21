@@ -1,6 +1,7 @@
 # SkyDisplay
 
-A bedside astronomy forecast display for an ESP32-S3 touchscreen (WT32-SC01 Plus, 3.5" 480×320).
+A bedside astronomy forecast display for an ESP32-S3 touchscreen: the WT32-SC01 Plus (3.5", 480×320) or the
+Seeed SenseCAP Indicator D1 (4", 480×480).
 It answers one question at a glance: is tonight, or tomorrow night, worth setting up the imaging rigs?
 
 ![Forecast screen](docs/forecast.png)
@@ -11,11 +12,14 @@ It answers one question at a glance: is tonight, or tomorrow night, worth settin
   cloud (RDPS, ECMWF, HRRR), transparency, seeing and darkness. A rotating footer shows the moon phase, moonrise and
   moonset, sunset, astronomical dark, sunrise, peak humidity, calmest wind and seeing.
 - **Weather:** current conditions, a 24-hour temperature and dew point trace, dew-risk warning, wind, pressure trend,
-  tonight's cloud cover, and a strip for tonight plus the next four days (day high and low, night-time cloud and
-  chance of precipitation), from a Weather Underground personal weather station.
+  tonight's cloud cover, and a strip with today's daytime forecast (until mid-afternoon), tonight and the next four
+  days (day high and low, night-time cloud and chance of precipitation), from a Weather Underground personal weather
+  station. The square Indicator screen also shows the text forecast for today (or tonight, later in the day).
 - **Status:** Wi-Fi, IP address, chart, clock sync and weather status, and a QR code for the settings page.
 
 Swipe between screens, tap to rotate the footer, long-press to dim. When the screen is dimmed, the first tap wakes it.
+The start-up screen is a setting; the display goes back to it after 2 minutes untouched. On the Indicator the whole
+footer fits on screen at once, so it doesn't rotate.
 
 ## Data sources
 
@@ -31,24 +35,41 @@ Swipe between screens, tap to rotate the footer, long-press to dim. When the scr
 ## Hardware
 
 - WT32-SC01 Plus: ESP32-S3 (2 MB PSRAM, 16 MB flash), ST7796 on an 8-bit parallel bus, FT6336U touch.
-- The repository also has HTML mockups for two other Seeed boards in `mockup/`.
+- SenseCAP Indicator D1: ESP32-S3 (8 MB octal PSRAM, 8 MB flash), ST7701S on a 16-bit RGB bus, FT6336 touch, PCA9535
+  I/O expander. Only the ESP32-S3 is used; the RP2040 co-processor keeps its own firmware.
+- `firmware/SkyDisplay/board.h` picks the board from the PSRAM setting (octal = Indicator); you can force one there.
+- The repository also has HTML mockups in `mockup/`.
 
 ## Building
 
-Arduino core esp32 3.3.x with the libraries LovyanGFX, WiFiManager and ArduinoJson.
+Arduino core esp32 3.3.x with the libraries LovyanGFX, WiFiManager, ArduinoJson and ElegantOTA (3.x).
 AnimatedGIF is bundled in `firmware/SkyDisplay/src/gif` with a wider line limit (see `VENDORED.txt`).
+Board "ESP32S3 Dev Module" with these options:
+
+| | WT32-SC01 Plus | SenseCAP Indicator D1 |
+|---|---|---|
+| USB CDC on boot | Enabled | Disabled |
+| USB mode | Hardware CDC and JTAG | (default) |
+| Flash size | 16MB | 8MB |
+| Partition scheme | 16M Flash (3MB APP/9.9MB FATFS) | 8M with spiffs (3MB APP/1.5MB SPIFFS) |
+| PSRAM | QSPI PSRAM | OPI PSRAM |
+| Serial monitor | 115200 | 460800 |
 
 ```
 arduino-cli compile -b esp32:esp32:esp32s3:CDCOnBoot=cdc,USBMode=hwcdc,FlashSize=16M,FlashMode=qio,PartitionScheme=app3M_fat9M_16MB,PSRAM=enabled firmware/SkyDisplay
+arduino-cli compile -b esp32:esp32:esp32s3:CDCOnBoot=default,FlashSize=8M,FlashMode=qio,PartitionScheme=default_8MB,PSRAM=opi firmware/SkyDisplay
 arduino-cli upload -p <port> -b <same as above> firmware/SkyDisplay
 ```
 
-After the first flash over USB, updates can go over Wi-Fi: upload the compiled `.bin` (Arduino IDE: Sketch >
-Export Compiled Binary, or `arduino-cli compile --output-dir`) on the settings page under Update firmware (`/update`).
+On the Indicator, use the USB-C port's ESP32-S3 serial device (a CH340), not the RP2040's.
+
+After the first flash over USB, updates can go over Wi-Fi: on the settings page, Update firmware (`/firmware`) opens
+the ElegantOTA upload page. Upload the compiled `.bin` (Arduino IDE: Sketch > Export Compiled Binary, or
+`arduino-cli compile --output-dir`). Use the file without "merged" in its name, built for the same board.
 
 Tools (Python 3 with Pillow):
 - `tools/make_fonts.py` regenerates `fonts.h` from the TrueType files in `tools/fonts`.
-- `tools/flash_and_shot.ps1` (PowerShell) builds, flashes and saves a screenshot over USB serial;
+- `tools/flash_and_shot.ps1 -Board wt32|indicator` (PowerShell) builds, flashes and saves a screenshot over USB serial;
   `tools/shot_to_png.py` converts the raw screenshot.
 
 ## First run
@@ -82,3 +103,5 @@ and are not covered by it.
 - Barlow Semi Condensed font: SIL Open Font License 1.1 (`tools/fonts/OFL.txt`); rendered into `fonts.h` by
   `tools/make_fonts.py`.
 - AnimatedGIF by Larry Bank: Apache License 2.0 (`firmware/SkyDisplay/src/gif/LICENSE`).
+- SenseCAP Indicator pin assignments and display timings follow Seeed's board support package
+  (SenseCAP_Indicator_ESP32).

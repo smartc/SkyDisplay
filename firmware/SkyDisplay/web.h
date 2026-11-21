@@ -10,3 +10,4 @@ struct WebHooks {
 
 void webBegin(const WebHooks& hooks);
 void webLoop();
+bool webUpdating();  // true while a firmware upload is in progress

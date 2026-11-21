@@ -1,17 +1,19 @@
-// SkyDisplay: bedside astronomy forecast for the WT32-SC01 Plus (ESP32-S3).
+// SkyDisplay: bedside astronomy forecast for the WT32-SC01 Plus or SenseCAP Indicator D1 (ESP32-S3).
+// The board is picked in board.h (automatically, from the PSRAM type).
 // Reads the Dark Dragons Clear Sky Chart GIF, decodes the forecast rows and shows
 // whether now, tonight and tomorrow night are worth setting up the rigs.
 // Settings page: http://skydisplay.local/ (or the IP shown in the serial log).
 //
 // Screens (swipe left/right): forecast, weather (Weather Underground), status.
 // Touch: tap = next footer page, long press = dim.
-// Serial commands (115200): s = screenshot dump, r = check chart and weather now, d = dump decoded rows,
+// Serial commands (115200 on the WT32, 460800 on the Indicator): s = screenshot dump, r = check chart and weather now, d = dump decoded rows,
 //   a = sun/moon times, n = next screen, i = info, W = forget Wi-Fi and restart.
 
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <esp_sntp.h>
 #include "config.h"
+#include "board.h"
 #include "settings.h"
 #include "forecast.h"
 #include "net.h"
@@ -33,7 +35,7 @@ static uint32_t nextDrawMs = 0, nextSkyMs = 0, lastTouchMs = 0;
 static bool manualDim = false;
 static uint32_t nightWakeUntilMs = 0;  // a tap during night hours brightens the screen until this time
 static bool skipAdvance = true;         // draw the current footer page without advancing first
-static const uint32_t SCREEN_RETURN_MS = 120000;  // other screens return to the forecast after this long untouched
+static const uint32_t SCREEN_RETURN_MS = 120000;  // other screens return to the start-up screen after this long untouched
 static time_t nowUtc();
 static volatile time_t lastNtpSync = 0;      // UTC time of the last successful NTP sync (0 = none since boot)
 static const long NTP_STALE_SECONDS = 12L * 3600;
@@ -222,6 +224,7 @@ static bool inNightHours() {
 }
 static bool isIdle() { return cfg.idleMode > 0 && millis() - lastTouchMs > (uint32_t)cfg.idleMinutes * 60000UL; }
 static int targetBacklight() {
+  if (BLANK_DURING_FLASH_WRITES && webUpdating()) return 0;  // see board.h
   if (isIdle()) return cfg.idleMode == 2 ? 0 : cfg.dimBrightness;
   if (manualDim) return cfg.dimBrightness;
   if (inNightHours() && (int32_t)(millis() - nightWakeUntilMs) >= 0) return cfg.dimBrightness;
@@ -263,10 +266,12 @@ void setup() {
   // each write waits (100 ms by default) for buffer space. With logging on taps and network events that
   // stalled the whole UI for seconds. Never wait: a bigger buffer, and lines that don't fit are dropped.
   Serial.setTxBufferSize(4096);
-  Serial.begin(115200);
+  Serial.begin(SERIAL_BAUD);
+#if ARDUINO_USB_CDC_ON_BOOT
   Serial.setTxTimeoutMs(0);
+#endif
   delay(300);
-  Serial.println("\n[main] SkyDisplay " FIRMWARE_VERSION " starting");
+  Serial.println("\n[main] SkyDisplay " FIRMWARE_VERSION " (" BOARD_NAME ") starting");
   settingsLoad();
   setenv("TZ", cfg.tz.c_str(), 1); tzset();
   Serial.printf("[main] PSRAM %u bytes, free heap %u\n", (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreeHeap());
@@ -305,6 +310,7 @@ void setup() {
   webBegin({webCheckNow, webApply, webStatus});
   httpsBegin(cfg.hostname);  // HTTPS location page for "Use my location" (browsers need HTTPS for GPS)
   ui.f = &fc;
+  ui.screen = cfg.startScreen;
   lastTouchMs = millis();
   // Network work (chart + weather) on core 0, so drawing and touch on core 1 never wait for it.
   xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, nullptr, 0);
@@ -329,7 +335,11 @@ void loop() {
   if (Serial.available()) {
     int c = Serial.read();
     DataGuard g;
+#if ARDUINO_USB_CDC_ON_BOOT
     if (c == 's') { Serial.setTxTimeoutMs(1000); uiScreenshot(Serial); Serial.flush(); Serial.setTxTimeoutMs(0); }  // someone is reading: wait for it
+#else
+    if (c == 's') { uiScreenshot(Serial); Serial.flush(); }
+#endif
     else if (c == 'r') webCheckNow();
     else if (c == 'd') dumpRows();
     else if (c == 'a') printSky();
@@ -380,7 +390,7 @@ void loop() {
     }
     // Redraw now; the rotation timer restarts from here.
     { int bl = targetBacklight(); uiSetBacklight(bl); currentBacklight = bl; }
-    if (currentBacklight > 0) { uint32_t t0 = millis(); DataGuard g; drawScreen(); perfNote("draw", t0); }
+    if (currentBacklight > 0 && !webUpdating()) { uint32_t t0 = millis(); DataGuard g; drawScreen(); perfNote("draw", t0); }
     nextDrawMs = millis() + (uint32_t)cfg.footerSeconds * 1000;
     skipAdvance = true;
   }
@@ -389,7 +399,8 @@ void loop() {
   if (bl != currentBacklight) { uiSetBacklight(bl); currentBacklight = bl; }
 
   // Footer rotation: advance a page, then draw. A tap already drew, so it skips one advance.
-  if (ui.screen != SCREEN_FORECAST && millis() - lastTouchMs > SCREEN_RETURN_MS) { ui.screen = SCREEN_FORECAST; nextDrawMs = 0; }
+  if (ui.screen != cfg.startScreen && millis() - lastTouchMs > SCREEN_RETURN_MS) { ui.screen = cfg.startScreen; nextDrawMs = 0; }
+  if (webUpdating()) { delay(10); return; }  // keep the update message on screen
   if ((int32_t)(millis() - nextDrawMs) >= 0) {
     if (!skipAdvance && ui.screen == SCREEN_FORECAST) ui.footerPage = (ui.footerPage + 1) % FOOTER_PAGES;
     skipAdvance = false;

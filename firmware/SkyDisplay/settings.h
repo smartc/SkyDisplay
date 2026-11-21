@@ -22,6 +22,7 @@ struct Settings {
   bool nightDim = false;            // dim between nightFrom and nightTo (local hours)
   int  nightFrom = 22, nightTo = 7;
   int  footerSeconds = 4;           // footer rotation
+  int  startScreen = 0;             // screen shown at start-up and returned to when idle (0 forecast, 1 weather, 2 status)
 
   // Scoring (deep-sky)
   int goodMaxCloud = 20;            // %

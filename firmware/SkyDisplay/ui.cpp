@@ -1,12 +1,20 @@
 #include "ui.h"
 #include "config.h"
 #include "settings.h"
-#include "lgfx_wt32sc01plus.h"
+#include "board.h"
 #include "fonts.h"
+#if defined(BOARD_INDICATOR)
+  #include "lgfx_indicator.h"
+  static LGFX_Indicator lcd;
+#else
+  #include "lgfx_wt32sc01plus.h"
+  static LGFX_WT32SC01Plus lcd;
+#endif
 
-static LGFX_WT32SC01Plus lcd;
 static LGFX_Sprite spr(&lcd);
-static const int W = 480, H = 320;
+static const int W = SCREEN_W, H = SCREEN_H;
+static const bool TALL = SCREEN_TALL;
+static const int OY = (H - 320) / 2;  // vertical offset that centres the 320-high setup and message layouts
 
 // ---------- smooth (anti-aliased) fonts, loaded once ----------
 struct SmoothFont {
@@ -68,6 +76,24 @@ static int textFit(const char* s, int x, int y, SmoothFont& f, SmoothFont& small
   return min((int)spr.textWidth(s), maxW);
 }
 
+// Word-wrapped text, top-left at (x, y), up to maxLines lines of lineH; the last line is shortened with "..".
+static void wrapText(const char* s, int x, int y, int w, SmoothFont& f, uint32_t col, int lineH, int maxLines) {
+  spr.setFont(&f.font);
+  String rest = s; rest.trim();
+  for (int line = 0; line < maxLines && rest.length(); line++) {
+    int fit = rest.length();
+    if (spr.textWidth(rest.c_str()) > w) {  // longest run of whole words that fits
+      fit = 0;
+      for (int i = 1; i <= (int)rest.length(); i++)
+        if ((i == (int)rest.length() || rest[i] == ' ') && spr.textWidth(rest.substring(0, i).c_str()) <= w) fit = i;
+      if (!fit) fit = rest.length();  // one long word: text() shortens it
+    }
+    bool last = line == maxLines - 1;
+    text(last ? rest.c_str() : rest.substring(0, fit).c_str(), x, y + line * lineH, f, col, top_left, w);
+    rest = rest.substring(fit); rest.trim();
+  }
+}
+
 static void led(int x, int y, uint32_t col, bool on) {
   if (on) for (int r = 24; r > 11; r--) { float t = 1.0f - (r - 11) / 13.0f; spr.fillCircle(x, y, r, c565(blend(C_TILE, col, 0.55f * t * t))); }
   spr.fillSmoothCircle(x, y, 10, c565(col));
@@ -91,8 +117,13 @@ static void localTm(time_t t, struct tm& out) { localtime_r(&t, &out); }
 static void startTouchTask();
 
 void uiBegin(uint8_t brightness) {
+#if defined(BOARD_INDICATOR)
+  lcd.begin();         // resets panel and touch through the I/O expander, then lcd.init()
+  lcd.setRotation(2);  // panel is mounted upside down relative to its native scan direction
+#else
   lcd.init();
   lcd.setRotation(1);  // landscape 480x320
+#endif
   lcd.setBrightness(brightness);
   lcd.fillScreen(TFT_BLACK);
   spr.setPsram(true);
@@ -136,9 +167,10 @@ static void header(const UiState& s, const char* rightText, bool rightWarn) {
 
 // One footer column: small grey label over a white value, aligned with a tile.
 // indent leaves room for an icon drawn before the value.
+static int footY = 276;  // label row of the footer being drawn; the value sits 18 px below
 static void footItem(int x, const char* label, const char* value, uint32_t valueCol, int indent = 0) {
-  text(label, x + 2, 276, fSmall, C_MUTED, top_left, 146);
-  text(value, x + 2 + indent, 294, fBody, valueCol, top_left, 146 - indent);
+  text(label, x + 2, footY, fSmall, C_MUTED, top_left, 146);
+  text(value, x + 2 + indent, footY + 18, fBody, valueCol, top_left, 146 - indent);
 }
 
 // Moon icon: dark disc with the lit part drawn row by row (lit on the right when waxing, as seen
@@ -168,15 +200,15 @@ static void footerDots(int page) {
   }
 }
 
-static void drawFooter(const UiState& s, const Forecast& f, const Night* tn, const Verdict& vTn) {
-  footerDots(s.footerPage);
+static void drawFooter(const UiState& s, const Forecast& f, const Night* tn, const Verdict& vTn, int page, int y) {
+  footY = y;
   char a[40], b[40], c[40];
   const SkyEvents& e = s.sky;
-  switch (s.footerPage) {
+  switch (page) {
     case 0: {  // moon
       if (!s.skyValid) { footItem(12, "MOON", "Needs location", C_MUTED); break; }
       snprintf(a, sizeof a, "MOON  %d%%", (int)lroundf(e.moonIllum * 100));
-      moonIcon(12 + 11, 294 + 11, 9, e.moonIllum, e.moonWaxing);
+      moonIcon(12 + 11, footY + 18 + 11, 9, e.moonIllum, e.moonWaxing);
       footItem(12, a, moonPhaseName(e.moonIllum, e.moonWaxing), C_FG, 26);
       fmtTime(b, sizeof b, e.moonrise); footItem(166, "MOONRISE", b, C_FG);
       fmtTime(c, sizeof c, e.moonset);  footItem(320, "MOONSET", c, C_FG);
@@ -215,7 +247,7 @@ void uiDraw(const UiState& s) {
   header(s);
   const Forecast* f = s.f;
   if (!f || !f->valid) {
-    text("Waiting for the first chart...", W / 2, 150, fTitle, C_MUTED, middle_center);
+    text("Waiting for the first chart...", W / 2, H / 2 - 10, fTitle, C_MUTED, middle_center);
     spr.pushSprite(0, 0);
     return;
   }
@@ -239,7 +271,7 @@ void uiDraw(const UiState& s) {
   int a = max(0, min(now - 3, f->n - COLS));
   const float x0 = 74, pitch = (468.0f - x0) / COLS;
   const int cw = max(1, (int)(pitch - 1.2f));
-  const int y0 = 154, rh = 11, rp = 14;
+  const int y0 = TALL ? 162 : 154, rh = TALL ? 18 : 11, rp = TALL ? 22 : 14;
   const char* labels[] = {"Score", "RDPS", "ECMWF", "HRRR", "Transp", "Seeing", "Dark"};
   for (int r = 0; r < 7; r++) {
     int y = y0 + r * rp;
@@ -278,14 +310,23 @@ void uiDraw(const UiState& s) {
     spr.drawFastVLine(xn, y0 - 4, yEnd - y0 + 1, c565(0x808080));
   }
 
-  drawFooter(s, *f, tn, vTn);
+  if (TALL) {  // room for all footer pages at once, no rotation
+    for (int p = 0; p < FOOTER_PAGES; p++) {
+      int y = 344 + p * 44;
+      if (p) spr.drawFastHLine(12, y - 4, W - 24, c565(C_LINE));
+      drawFooter(s, *f, tn, vTn, p, y);
+    }
+  } else {
+    footerDots(s.footerPage);
+    drawFooter(s, *f, tn, vTn, s.footerPage, 276);
+  }
   spr.pushSprite(0, 0);
 }
 
 // Status screen: two columns of label/value rows, plus a QR code for the settings page.
 static void statusColumn(int x, int w, const StatusItem* items, int n) {
   for (int k = 0; k < n; k++) {
-    int y = 44 + k * 34;
+    int y = TALL ? 46 + k * 42 : 44 + k * 34;
     text(items[k].label.c_str(), x, y, fSmall, C_MUTED, top_left, w);
     text(items[k].value.c_str(), x, y + 15, fBody, items[k].warn ? C_MAYBE : C_FG, top_left, w);
   }
@@ -294,15 +335,26 @@ static void statusColumn(int x, int w, const StatusItem* items, int n) {
 void uiDrawStatus(const UiState& s, const StatusInfo& st) {
   spr.fillScreen(c565(C_BG));
   header(s);
-  statusColumn(16, 200, st.left, st.nLeft);
-  statusColumn(232, 130, st.right, st.nRight);
-  if (st.qrUrl.length()) {
-    const int qx = 372, qy = 50, qw = 96;
-    spr.fillRoundRect(qx - 6, qy - 6, qw + 12, qw + 12, 8, TFT_WHITE);
-    spr.qrcode(st.qrUrl.c_str(), qx, qy, qw, 3);
-    text("Settings", qx + qw / 2, qy + qw + 12, fSmall, C_MUTED, top_center);
+  statusColumn(16, TALL ? 220 : 200, st.left, st.nLeft);
+  statusColumn(TALL ? 252 : 232, TALL ? 216 : 130, st.right, st.nRight);
+  if (TALL) {  // square screen: columns get the full width, QR code along the bottom
+    spr.drawFastHLine(12, 362, W - 24, c565(C_LINE));
+    if (st.qrUrl.length()) {
+      const int qw = 92, qx = W - 18 - qw, qy = 374;
+      spr.fillRoundRect(qx - 5, qy - 5, qw + 10, qw + 10, 8, TFT_WHITE);
+      spr.qrcode(st.qrUrl.c_str(), qx, qy, qw, 3);
+      text("Scan for the settings page", 16, 396, fBody, C_FG, top_left, qx - 40);
+      text(st.qrUrl.c_str(), 16, 422, fBody, C_MUTED, top_left, qx - 40);
+    }
+  } else {
+    if (st.qrUrl.length()) {
+      const int qw = 96, qx = W - 12 - qw, qy = 50;
+      spr.fillRoundRect(qx - 6, qy - 6, qw + 12, qw + 12, 8, TFT_WHITE);
+      spr.qrcode(st.qrUrl.c_str(), qx, qy, qw, 3);
+      text("Settings", qx + qw / 2, qy + qw + 12, fSmall, C_MUTED, top_center);
+    }
+    text("Swipe for the other screens", W / 2, H - 22, fSmall, C_IDLE, top_center);
   }
-  text("Swipe for the other screens", W / 2, H - 22, fSmall, C_IDLE, top_center);
   spr.pushSprite(0, 0);
 }
 
@@ -389,6 +441,20 @@ static void wxTrace(int x, int y, int w, int h, const Weather& wx) {
   for (int i = WX_TRACE - 1; i >= 0; i--) if (!isnan(wx.traceT[i])) { spr.fillSmoothCircle(px(i), py(wx.traceT[i]), 3, c565(C_TEMP)); break; }
 }
 
+// Number with a small icon in front (raindrop = precip chance, cloud = cloud cover), centred on cx, text baseline y.
+static void miniStat(const char* num, int cx, int y, bool cloud, uint32_t col, uint32_t bg) {
+  spr.setFont(&fSmall.font);
+  int tw = spr.textWidth(num), iw = 12, x = cx - (iw + 4 + tw) / 2, iy = y - 5;
+  if (cloud) wxCloud(x + 6, iy, 0.45f, C_MUTED);
+  else {
+    uint16_t c = c565(C_DEW);
+    spr.fillSmoothCircle(x + 6, iy + 2, 4, c);
+    spr.fillTriangle(x + 2, iy + 1, x + 10, iy + 1, x + 6, iy - 7, c);
+  }
+  (void)bg;
+  text(num, x + iw + 4, y, fSmall, col, baseline_left);
+}
+
 static const char* COMPASS[16] = {"N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"};
 
 void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const String& settingsUrl) {
@@ -404,10 +470,10 @@ void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const S
 
   if (!configured || !wx.haveCurrent) {
     const char* title = configured ? "No weather data yet" : "Weather not set up";
-    text(title, W / 2, 110, fTitle, C_FG, top_center);
-    if (configured && wx.error.length()) text(wx.error.c_str(), W / 2, 156, fBody, C_MAYBE, top_center, W - 40);
-    else text("Add your Weather Underground station ID and API key", W / 2, 156, fBody, C_MUTED, top_center, W - 40);
-    text(("on the settings page: " + settingsUrl).c_str(), W / 2, 184, fBody, C_MUTED, top_center, W - 40);
+    text(title, W / 2, OY + 110, fTitle, C_FG, top_center);
+    if (configured && wx.error.length()) text(wx.error.c_str(), W / 2, OY + 156, fBody, C_MAYBE, top_center, W - 40);
+    else text("Add your Weather Underground station ID and API key", W / 2, OY + 156, fBody, C_MUTED, top_center, W - 40);
+    text(("on the settings page: " + settingsUrl).c_str(), W / 2, OY + 184, fBody, C_MUTED, top_center, W - 40);
     text("Swipe for the other screens", W / 2, H - 22, fSmall, C_IDLE, top_center);
     spr.pushSprite(0, 0);
     return;
@@ -466,21 +532,48 @@ void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const S
     text(b, 456, 161, fBody, C_FG, baseline_right);
   } else text(MINUS, 456, 161, fBody, C_MUTED, baseline_right);
 
-  // ---- five-day strip (night cloud and precip, since nights are what matter) ----
-  const float x0 = 12, w5 = (468 - x0) / WX_DAYS; const int y0 = 198;
-  for (int k = 0; k < WX_DAYS; k++) {
-    const WxDay& d = wx.days[k];
+  // ---- text forecast (square screen only) ----
+  if (TALL) {
+    const int ty = 198, th = 148;
+    spr.fillSmoothRoundRect(12, ty, 456, th, 10, c565(C_TILE)); spr.drawRoundRect(12, ty, 456, th, 10, c565(C_LINE));
+    String title = wx.forecastTitle.length() ? wx.forecastTitle : String("FORECAST");
+    text((title + " (WU)").c_str(), 24, ty + 20, fSmall, C_MUTED, baseline_left, 200);
+    if (wx.today.valid) {  // today's headline numbers, top right
+      char hi[16]; fmtDeg(hi, sizeof hi, wx.today.hi, 0);
+      if (wx.today.pop >= 0) snprintf(b, sizeof b, "High %s, %d%% precip", hi, wx.today.pop); else snprintf(b, sizeof b, "High %s", hi);
+      text(b, 456, ty + 20, fBody, C_FG, baseline_right, 220);
+    }
+    if (!wx.haveForecast) text("Pending", 24, ty + 52, fBody, C_IDLE, baseline_left);
+    else if (!wx.forecastText.length()) text("No text forecast", 24, ty + 52, fBody, C_IDLE, baseline_left);
+    else wrapText(wx.forecastText.c_str(), 24, ty + 32, 432, fTitle, C_FG, 28, 4);
+  }
+
+  // ---- day strip: today's daytime (while it lasts), then tonight and four more nights ----
+  const WxDay* cells[WX_DAYS + 1]; int nc = 0;
+  if (wx.today.valid) cells[nc++] = &wx.today;
+  for (int k = 0; k < WX_DAYS; k++) cells[nc++] = &wx.days[k];
+  const float x0 = 12, w5 = (468 - x0) / nc; const int y0 = TALL ? 356 : 198;
+  for (int k = 0; k < nc; k++) {
+    const WxDay& d = *cells[k];
     int x = (int)(x0 + k * w5), cx = (int)(x0 + k * w5 + w5 / 2), cw = (int)w5 - 4;
-    uint32_t bg = k == 0 ? 0x111A2B : C_TILE;
+    bool tonight = &d == &wx.days[0], today = &d == &wx.today;
+    uint32_t bg = tonight ? 0x111A2B : C_TILE;
     spr.fillSmoothRoundRect(x + 2, y0, cw, 114, 9, c565(bg)); spr.drawRoundRect(x + 2, y0, cw, 114, 9, c565(C_LINE));
     if (!wx.haveForecast) { text("Pending", cx, y0 + 57, fSmall, C_IDLE, middle_center, cw - 10); continue; }
-    text(d.name, cx, y0 + 20, fSmall, k == 0 ? C_FG : C_MUTED, baseline_center, cw - 10);
+    text(d.name, cx, y0 + 20, fSmall, tonight || today ? C_FG : C_MUTED, baseline_center, cw - 8);
     wxIcon(d.icon, cx, y0 + 42, bg);
     char lo[16], hi[16]; fmtDeg(lo, sizeof lo, d.lo, 0); fmtDeg(hi, sizeof hi, d.hi, 0);
-    if (isnan(d.hi)) snprintf(b, sizeof b, "Low %s", lo); else snprintf(b, sizeof b, "%s / %s", hi, lo);
-    textFit(b, cx, y0 + 76, fBody, fSmall, C_FG, baseline_center, cw - 10);
-    if (d.pop >= 0) { snprintf(b, sizeof b, "%d%% precip", d.pop); text(b, cx, y0 + 93, fSmall, d.pop >= 50 ? C_MAYBE : C_MUTED, baseline_center, cw - 10); }
-    if (d.cloud >= 0) { snprintf(b, sizeof b, "%d%% cloud", d.cloud); text(b, cx, y0 + 108, fSmall, C_MUTED, baseline_center, cw - 10); }
+    if (isnan(d.hi)) snprintf(b, sizeof b, "Low %s", lo);
+    else if (isnan(d.lo)) snprintf(b, sizeof b, "High %s", hi);
+    else snprintf(b, sizeof b, "%s / %s", hi, lo);
+    textFit(b, cx, y0 + 76, fBody, fSmall, C_FG, baseline_center, cw - 8);
+    if (cw >= 84) {  // wide cells: words
+      if (d.pop >= 0) { snprintf(b, sizeof b, "%d%% precip", d.pop); text(b, cx, y0 + 93, fSmall, d.pop >= 50 ? C_MAYBE : C_MUTED, baseline_center, cw - 8); }
+      if (d.cloud >= 0) { snprintf(b, sizeof b, "%d%% cloud", d.cloud); text(b, cx, y0 + 108, fSmall, C_MUTED, baseline_center, cw - 8); }
+    } else {         // six narrow cells: a small raindrop or cloud before the number
+      if (d.pop >= 0) { snprintf(b, sizeof b, "%d%%", d.pop); miniStat(b, cx, y0 + 93, false, d.pop >= 50 ? C_MAYBE : C_MUTED, bg); }
+      if (d.cloud >= 0) { snprintf(b, sizeof b, "%d%%", d.cloud); miniStat(b, cx, y0 + 108, true, C_MUTED, bg); }
+    }
   }
   spr.pushSprite(0, 0);
 }
@@ -500,41 +593,41 @@ static String wifiQrEscape(const char* s) {
 
 void uiWifiSetupScreen(const char* apName, const String& setupUrl) {
   spr.fillScreen(c565(C_BG));
-  text("Wi-Fi setup", W / 2, 10, fTitle, C_FG, top_center);
-  const int qs = 132, y = 62;
+  text("Wi-Fi setup", W / 2, OY + 10, fTitle, C_FG, top_center);
+  const int qs = 132, y = OY + 62;
   const int x1 = 120 - qs / 2, x2 = 360 - qs / 2;
   String wifi = "WIFI:T:nopass;S:" + wifiQrEscape(apName) + ";;";
   qrPanel(x1, y, qs, wifi.c_str());
   qrPanel(x2, y, qs, setupUrl.c_str());
-  text("1. Join the setup network", 120, 214, fBodyB, C_FG, top_center, 220);
-  text(apName, 120, 240, fBody, C_MUTED, top_center, 220);
-  text("2. Open the setup page", 360, 214, fBodyB, C_FG, top_center, 220);
-  text(setupUrl.c_str(), 360, 240, fBody, C_MUTED, top_center, 220);
-  text("Scan with your phone camera. The page often opens after step 1.", W / 2, 288, fSmall, C_IDLE, top_center, W - 24);
+  text("1. Join the setup network", 120, OY + 214, fBodyB, C_FG, top_center, 220);
+  text(apName, 120, OY + 240, fBody, C_MUTED, top_center, 220);
+  text("2. Open the setup page", 360, OY + 214, fBodyB, C_FG, top_center, 220);
+  text(setupUrl.c_str(), 360, OY + 240, fBody, C_MUTED, top_center, 220);
+  text("Scan with your phone camera. The page often opens after step 1.", W / 2, OY + 288, fSmall, C_IDLE, top_center, W - 24);
   spr.pushSprite(0, 0);
 }
 
 void uiFirstRunScreen(const UiState& s) {
   spr.fillScreen(c565(C_BG));
   header(s);
-  const int qs = 150, qx = W - 24 - qs, qy = 70;
+  const int qs = 150, qx = W - 24 - qs, qy = OY + 70;
   qrPanel(qx, qy, qs, s.settingsUrl.c_str());
-  text("Almost there", 24, 64, fTitle, C_FG, top_left);
-  text("Wi-Fi is connected. Scan the code", 24, 112, fBody, C_MUTED, top_left, qx - 40);
-  text("to open the settings page, then", 24, 138, fBody, C_MUTED, top_left, qx - 40);
-  text("add your Clear Sky Chart link", 24, 164, fBody, C_MUTED, top_left, qx - 40);
-  text("and your time zone.", 24, 190, fBody, C_MUTED, top_left, qx - 40);
-  text(s.settingsUrl.c_str(), 24, 232, fBodyB, C_FG, top_left, qx - 40);
+  text("Almost there", 24, OY + 64, fTitle, C_FG, top_left);
+  text("Wi-Fi is connected. Scan the code", 24, OY + 112, fBody, C_MUTED, top_left, qx - 40);
+  text("to open the settings page, then", 24, OY + 138, fBody, C_MUTED, top_left, qx - 40);
+  text("add your Clear Sky Chart link", 24, OY + 164, fBody, C_MUTED, top_left, qx - 40);
+  text("and your time zone.", 24, OY + 190, fBody, C_MUTED, top_left, qx - 40);
+  text(s.settingsUrl.c_str(), 24, OY + 232, fBodyB, C_FG, top_left, qx - 40);
   text("Settings", qx + qs / 2, qy + qs + 16, fSmall, C_MUTED, top_center);
   spr.pushSprite(0, 0);
 }
 
 void uiMessage(const char* title, const char* l1, const char* l2, const char* l3) {
   spr.fillScreen(c565(C_BG));
-  text(title, W / 2, 86, fTitle, C_FG, top_center);
-  text(l1, W / 2, 140, fBody, C_MUTED, top_center, W - 40);
-  text(l2, W / 2, 168, fBody, C_MUTED, top_center, W - 40);
-  text(l3, W / 2, 196, fBody, C_MUTED, top_center, W - 40);
+  text(title, W / 2, OY + 86, fTitle, C_FG, top_center);
+  text(l1, W / 2, OY + 140, fBody, C_MUTED, top_center, W - 40);
+  text(l2, W / 2, OY + 168, fBody, C_MUTED, top_center, W - 40);
+  text(l3, W / 2, OY + 196, fBody, C_MUTED, top_center, W - 40);
   spr.pushSprite(0, 0);
 }
 

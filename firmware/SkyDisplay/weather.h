@@ -7,10 +7,11 @@ static const int WX_TRACE = 24;  // 24 h at hourly steps
 static const int WX_DAYS = 5;    // tonight + next 4 days
 
 struct WxDay {
-  char name[10] = "";            // "TONIGHT", "SAT", ...
-  float hi = NAN, lo = NAN;      // degrees C (hi is NAN for "tonight")
-  int pop = -1, cloud = -1;      // night precip chance and cloud cover, %
-  int icon = -1;                 // WU icon code for the night
+  char name[10] = "";            // "TODAY", "TONIGHT", "SAT", ...
+  float hi = NAN, lo = NAN;      // degrees C (hi is NAN for "tonight", lo is NAN for "today")
+  int pop = -1, cloud = -1;      // precip chance and cloud cover, % (night for the day cells, daytime for today)
+  int icon = -1;                 // WU icon code (night, or daytime for today)
+  bool valid = false;
 };
 
 struct Weather {
@@ -27,7 +28,9 @@ struct Weather {
   // forecast
   bool   haveForecast = false;
   int    cloudTonight = -1;
-  WxDay  days[WX_DAYS];
+  WxDay  today;                                // today's daytime forecast; not valid once the day part has passed
+  WxDay  days[WX_DAYS];                        // tonight, then the next four days (night conditions)
+  String forecastTitle, forecastText;          // WU text forecast: "TODAY" (daytime) or "TONIGHT" once the day is over
   // status
   String error;                                // last error, empty if fine
 };

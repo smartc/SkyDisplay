@@ -37,6 +37,7 @@ void settingsLoad() {
   cfg.nightFrom     = prefs.getInt("nightFrom", d.nightFrom);
   cfg.nightTo       = prefs.getInt("nightTo", d.nightTo);
   cfg.footerSeconds = prefs.getInt("footSec", d.footerSeconds);
+  cfg.startScreen = constrain(prefs.getInt("startScr", d.startScreen), 0, 2);
   cfg.goodMaxCloud  = prefs.getInt("goodCloud", d.goodMaxCloud);
   cfg.goodMinTrans  = prefs.getInt("goodTrans", d.goodMinTrans);
   cfg.goMinHours    = prefs.getInt("goHours", d.goMinHours);
@@ -65,6 +66,7 @@ void settingsSave() {
   prefs.putInt("nightFrom", cfg.nightFrom);
   prefs.putInt("nightTo", cfg.nightTo);
   prefs.putInt("footSec", cfg.footerSeconds);
+  prefs.putInt("startScr", cfg.startScreen);
   prefs.putInt("goodCloud", cfg.goodMaxCloud);
   prefs.putInt("goodTrans", cfg.goodMinTrans);
   prefs.putInt("goHours", cfg.goMinHours);
