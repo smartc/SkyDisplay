@@ -21,3 +21,4 @@ build/
 .DS_Store
 Thumbs.db
 __pycache__/
+tools/pushover_keys.json

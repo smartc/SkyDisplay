@@ -27,7 +27,7 @@ static const uint32_t WS_QUIET_MS = 180000;     // no frame (Pushover sends '#' 
 
 static WebSocketsClient ws;
 static volatile bool syncReq = false, restartReq = true, stopped = false;
-static volatile uint32_t ackId = 0;  // message to acknowledge (set from the main loop on a tap)
+static uint64_t ackId = 0;  // message to acknowledge (set from the main loop on a tap; under the data lock)
 static bool fsMounted = false;
 
 static void setState(PoState s, const String& err) {
@@ -178,11 +178,14 @@ static bool sync(const String& secret, const String& device) {
   JsonDocument d;
   if (deserializeJson(d, body)) { logf("[po] download: bad JSON\n"); return true; }
   JsonArrayConst arr = d["messages"];
-  uint32_t highest = 0; int added = 0; int8_t topPri = -2;
+  if (arr.size()) logf("[po] download: %u message(s)\n", (unsigned)arr.size());
+  uint64_t highest = 0; int added = 0; int8_t topPri = -2;
   {
     DataGuard g;
     for (JsonVariantConst m : arr) {
-      uint32_t id = m["id"] | 0;
+      // Ids don't fit 32 bits; id_str is the exact value as text.
+      const char* ids = m["id_str"] | "";
+      uint64_t id = *ids ? strtoull(ids, nullptr, 10) : m["id"].as<uint64_t>();
       if (!id) continue;
       if (id > highest) highest = id;
       bool dup = false;
@@ -205,17 +208,18 @@ static bool sync(const String& secret, const String& device) {
       bool fresh = x.date && now - (time_t)x.date < 15 * 60;
       if (fresh && x.priority > topPri) topPri = x.priority;
     }
-    if (added) { poInbox.unread = min(poInbox.unread + added, PO_MAX); poInbox.newestId = highest; poInbox.newestPriority = topPri; }
+    if (added) { poInbox.unread = min(poInbox.unread + added, PO_MAX); poInbox.arrivals++; poInbox.newestPriority = topPri; }
   }
   if (added) { logf("[po] %d new message(s)\n", added); saveInbox(); }
   if (highest) {
-    code = request("POST", "devices/" + urlEnc(device) + "/update_highest_message.json", "secret=" + urlEnc(secret) + "&message=" + String(highest), body);
+    char hs[24]; snprintf(hs, sizeof hs, "%llu", (unsigned long long)highest);
+    code = request("POST", "devices/" + urlEnc(device) + "/update_highest_message.json", "secret=" + urlEnc(secret) + "&message=" + hs, body);
     if (code != 200) logf("[po] delete on server failed (%d); they'll be skipped next time\n", code);
   }
   return true;
 }
 
-static void acknowledge(const String& secret, uint32_t id) {
+static void acknowledge(const String& secret, uint64_t id) {
   String receipt;
   { DataGuard g; for (int i = 0; i < poInbox.n; i++) if (poInbox.msg[i].id == id) receipt = poInbox.msg[i].receipt; }
   if (!receipt.length()) return;
@@ -298,7 +302,8 @@ static void poTask(void*) {
       if (!sync(secret, device)) { stopped = true; continue; }
       nextSyncRetry = millis() + 5000;  // Pushover: no sooner than 5 s between retries
     }
-    if (ackId) { uint32_t id = ackId; ackId = 0; acknowledge(secret, id); }
+    uint64_t ack; { DataGuard g; ack = ackId; ackId = 0; }
+    if (ack) acknowledge(secret, ack);
     vTaskDelay(pdMS_TO_TICKS(20));
   }
 }

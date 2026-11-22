@@ -9,7 +9,7 @@
 static const int PO_MAX = 20;
 
 struct PoMsg {
-  uint32_t id = 0;           // Pushover's message id for this device
+  uint64_t id = 0;           // Pushover's message id for this device (larger than 32 bits)
   uint32_t date = 0;         // UTC
   int8_t   priority = 0;     // -2 lowest .. 2 emergency
   uint8_t  acked = 0;        // emergency messages: acknowledged
@@ -25,7 +25,7 @@ struct PoInbox {
   PoMsg  msg[PO_MAX];        // newest first
   int    n = 0;
   int    unread = 0;         // arrived since the screen was last shown
-  uint32_t newestId = 0;     // bumped on arrival, so the main loop can react (wake, switch screen)
+  uint32_t arrivals = 0;     // counts downloads that brought new messages, so the main loop can react (wake, switch screen)
   int8_t newestPriority = 0;
   PoState state = PO_OFF;
   String  error;             // why it stopped or is retrying, empty if fine

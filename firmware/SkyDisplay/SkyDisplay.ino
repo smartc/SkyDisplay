@@ -47,7 +47,7 @@ static uint32_t wxSavedMs = 0;             // last weather save to flash
 static const uint32_t WX_SAVE_MS = 30UL * 60000;  // current conditions alone are saved at most this often (flash wear)
 static volatile bool refreshPending = false;      // "Refresh now" tapped on the status screen; cleared by the next chart check
 static uint32_t refreshTapMs = 0;
-static uint32_t poSeenId = 0;  // newest notification the loop has reacted to (wake, switch screen)
+static uint32_t poSeenArrivals = 0;  // notification downloads the loop has reacted to (wake, switch screen)
 static volatile uint32_t nextCheckMs = 0;  // shared with the network task
 static uint32_t nextDrawMs = 0, nextSkyMs = 0, lastTouchMs = 0;
 static bool manualDim = false;
@@ -530,9 +530,9 @@ void loop() {
   }
 
   if (chartJustUpdated) { chartJustUpdated = false; DataGuard g; updateSky(); }
-  if (poInbox.newestId != poSeenId) {  // new notification(s)
+  if (poInbox.arrivals != poSeenArrivals) {  // new notification(s)
     DataGuard g;
-    poSeenId = poInbox.newestId;
+    poSeenArrivals = poInbox.arrivals;
     int pri = poInbox.newestPriority;
     bool show = cfg.poEnabled && (cfg.poWake == 2 || (cfg.poWake == 1 && pri >= 1) || pri >= 2);
     // Sound: only fresh messages count (newestPriority ignores a backlog); quiet hours don't apply.
