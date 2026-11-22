@@ -19,6 +19,11 @@ It answers one question at a glance: is tonight, or tomorrow night, worth settin
   brightness and sky temperature, mount park sensors, and each imaging rig's state from NINA (imaging, waiting,
   finished, lost, inactive). With more than two rigs the list pages, like the footer. See
   `mockup/observatory-screen.html`.
+- **Notifications** (optional): messages sent to your Pushover account, e.g. from NINA. The newest in full, the
+  next ones as a list; tap for the next message. A new message can wake the screen and switch to it (a setting), and
+  an emergency message stays up with an Acknowledge button. On the Indicator an emergency message can also sound the
+  buzzer (beep-beep every 3 seconds until you tap the screen, 5 minutes at most); a switch on the screen turns the
+  sound off for the night. See "Notifications" below.
 - **Status:** Wi-Fi, IP address, chart, clock sync and weather status, a QR code for the settings page, and a
   **Refresh now** button (same as "Check chart and weather now" on the settings page).
 
@@ -51,17 +56,42 @@ footer fits on screen at once, so it doesn't rotate.
     doesn't answer is shown as inactive; a finished or lost run stays on screen until a set hour.
 - **Sun and moon** times are computed on the device.
 
+## Notifications
+
+The display is an unofficial Pushover Open Client, not released or supported by Pushover. On the settings page, link
+it to your account (email and password are used once, to register the display as a device, and not stored), then turn
+on the screen. Pushover licenses it like a desktop client: free for 30 days, then a one-time Pushover for Desktop
+licence covers it.
+
+- Send to it by its device name (the settings page suggests the display's hostname). A sender that names no device
+  reaches every device on the account, displays included.
+- Turning the screen off on the settings page also disconnects the display from Pushover. Messages for it wait on
+  Pushover's servers (up to 21 days) and arrive quietly when it's turned back on: only messages under 15 minutes old
+  can wake the screen or sound the alarm.
+- Messages are deleted from Pushover once the display has them; it keeps the latest 20 in its own flash.
+- Sound needs SkyDisplay's RP2040 firmware on the Indicator: see `firmware/IndicatorRP2040/README.md`.
+
 ## Hardware
 
 - WT32-SC01 Plus: ESP32-S3 (2 MB PSRAM, 16 MB flash), ST7796 on an 8-bit parallel bus, FT6336U touch.
 - SenseCAP Indicator D1: ESP32-S3 (8 MB octal PSRAM, 8 MB flash), ST7701S on a 16-bit RGB bus, FT6336 touch, PCA9535
-  I/O expander. Only the ESP32-S3 is used; the RP2040 co-processor keeps its own firmware.
+  I/O expander. The RP2040 co-processor drives the buzzer; for sound it runs SkyDisplay's own small firmware
+  (`firmware/IndicatorRP2040`), otherwise it can keep Seeed's.
 - `firmware/SkyDisplay/board.h` picks the board from the PSRAM setting (octal = Indicator); you can force one there.
+  It also says what each board has (e.g. `BOARD_HAS_SOUND`); the rest of the code checks those, not the board name.
+
+| | WT32-SC01 Plus | SenseCAP Indicator D1 |
+|---|---|---|
+| Screen | 3.5" 480×320, footer rotates | 4" 480×480, whole footer and text forecast shown |
+| Alarm sound | not yet (speaker connector, I2S) | buzzer, with `firmware/IndicatorRP2040` |
+| Notifications storage | FAT partition | LittleFS partition |
+| Screen during firmware updates | stays on | backlight off (the RGB panel tears while flash is written) |
 - The repository also has HTML mockups in `mockup/`.
 
 ## Building
 
-Arduino core esp32 3.3.x with the libraries LovyanGFX, WiFiManager, ArduinoJson and ElegantOTA (3.x).
+Arduino core esp32 3.3.x with the libraries LovyanGFX, WiFiManager, ArduinoJson, ElegantOTA (3.x) and
+WebSockets (Markus Sattler, 2.7.x).
 AnimatedGIF is bundled in `firmware/SkyDisplay/src/gif` with a wider line limit (see `VENDORED.txt`).
 Board "ESP32S3 Dev Module" with these options:
 

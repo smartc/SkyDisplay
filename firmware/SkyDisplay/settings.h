@@ -22,7 +22,7 @@ struct Settings {
   bool nightDim = false;            // dim between nightFrom and nightTo (local hours)
   int  nightFrom = 22, nightTo = 7;
   int  footerSeconds = 4;           // footer rotation
-  int  startScreen = 0;             // screen shown at start-up and returned to when idle (0 forecast, 1 weather, 2 status, 3 observatory)
+  int  startScreen = 0;             // screen shown at start-up and returned to when idle (0 forecast, 1 weather, 2 status, 3 observatory, 4 notifications)
 
   // Scoring (deep-sky)
   int goodMaxCloud = 20;            // %
@@ -46,6 +46,15 @@ struct Settings {
   String rigPark[MAX_RIGS];         // optional park sensor: the name or serial of one heard on the UDP broadcast, or an
                                     // Alpaca Switch address "host:port[/device][#switch]" (on = parked)
   int    obsHoldHour = 12;          // a finished (or lost) night's run stays on screen until this local hour
+
+  // Notifications screen (unofficial Pushover Open Client). The secret and device id come from linking the display
+  // on the settings page (the account password is never stored).
+  bool   poEnabled = false;
+  int    poWake = 1;                // new message: 0 just counts it, 1 high priority and up wake the screen and show it, 2 all do
+  String poSecret = "", poDevice = "", poDeviceName = "";
+  // Alarm sound (boards with BOARD_HAS_SOUND): which notifications sound it, and the on/off switch (also on the screen).
+  int    alarmLevel = 1;            // 0 never, 1 emergency (beep-beep until acknowledged), 2 also high priority (one chime)
+  bool   soundArmed = true;
 
   // Device
   String hostname = "skydisplay";

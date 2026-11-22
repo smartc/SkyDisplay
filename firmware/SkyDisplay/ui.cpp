@@ -163,8 +163,8 @@ static void header(const UiState& s, const char* rightText, bool rightWarn) {
   // Screen dots, between the date and the status text.
   for (int k = 0; k < s.dotCount; k++) {
     int x = 236 + (k - (s.dotCount - 1) / 2.0f) * 14, y = 15;
-    if (k == s.dotIndex) spr.fillSmoothCircle(x, y, 4, c565(C_FG));
-    else spr.fillSmoothCircle(x, y, 3, c565(C_IDLE));
+    uint32_t dc = k == s.dotAlert ? C_MAYBE : k == s.dotIndex ? C_FG : C_IDLE;
+    spr.fillSmoothCircle(x, y, k == s.dotIndex ? 4 : 3, c565(dc));
   }
 }
 
@@ -885,6 +885,165 @@ void uiDrawObservatory(const UiState& s, const Observatory& o, const String& set
 static void qrPanel(int x, int y, int size, const char* data) {
   spr.fillRoundRect(x - 8, y - 8, size + 16, size + 16, 10, TFT_WHITE);
   spr.qrcode(data, x, y, size, 3);
+}
+
+// ---------- notifications screen ----------
+static const uint32_t C_ACCENT = 0x6FB6FF;
+static uint32_t poColor(int pri) { return pri >= 2 ? C_NO : pri == 1 ? C_MAYBE : pri == 0 ? C_ACCENT : C_IDLE; }
+
+// "14:05" today, "SAT 18:03" within the week, else "12 NOV".
+static void poWhen(char* b, size_t n, time_t t, time_t now) {
+  if (!t) { snprintf(b, n, "%s", MINUS); return; }
+  struct tm a, c; localTm(t, a); localTm(now ? now : t, c);
+  long age = now ? (long)(now - t) : 0;
+  if (a.tm_yday == c.tm_yday && a.tm_year == c.tm_year) snprintf(b, n, "%02d:%02d", a.tm_hour, a.tm_min);
+  else if (age >= 0 && age < 6L * 86400) snprintf(b, n, "%s %02d:%02d", DOW[a.tm_wday], a.tm_hour, a.tm_min);
+  else snprintf(b, n, "%d %s", a.tm_mday, MON[a.tm_mon]);
+}
+
+// Word-wrapped text with '\n' paragraph breaks, at most maxLines lines; the last is shortened with ".." when more
+// follows. Returns the lines used.
+static int wrapParas(const char* s, int x, int y, int w, SmoothFont& f, uint32_t col, int lineH, int maxLines) {
+  spr.setFont(&f.font);
+  String rest = s; int line = 0;
+  while (line < maxLines && rest.length()) {
+    int nl = rest.indexOf('\n');
+    String para = nl < 0 ? rest : rest.substring(0, nl);
+    rest = nl < 0 ? String() : rest.substring(nl + 1);
+    para.trim();
+    if (!para.length()) continue;
+    while (para.length() && line < maxLines) {
+      spr.setFont(&f.font);
+      int fit = para.length();
+      if (spr.textWidth(para.c_str()) > w) {  // longest run of whole words that fits; a long word is cut
+        fit = 0;
+        for (int i = 1; i <= (int)para.length(); i++)
+          if ((i == (int)para.length() || para[i] == ' ') && spr.textWidth(para.substring(0, i).c_str()) <= w) fit = i;
+        if (!fit) { fit = 1; while (fit < (int)para.length() && spr.textWidth(para.substring(0, fit + 1).c_str()) <= w) fit++; }
+      }
+      bool last = line == maxLines - 1;
+      if (last && (fit < (int)para.length() || rest.length())) {
+        text((para + " " + rest).c_str(), x, y + line * lineH, f, col, top_left, w);  // text() shortens it with ".."
+        return line + 1;
+      }
+      text(para.substring(0, fit).c_str(), x, y + line * lineH, f, col, top_left, w);
+      para = para.substring(fit); para.trim();
+      line++;
+    }
+  }
+  return line;
+}
+
+static const int PO_ROWS = TALL ? 4 : 2, PO_ROW_H = 30;
+static const int PO_CARD_Y = 34, PO_CARD_B = H - 24 - PO_ROWS * PO_ROW_H - 6;  // card top and bottom
+static const Rect PO_ACK_BTN = {28, PO_CARD_B - 48, 190, 38};
+
+static const Rect PO_SOUND_BTN = {12, H - 30, 118, 26};
+bool uiPoSoundHit(int x, int y) {
+  const Rect& r = PO_SOUND_BTN; const int slack = 10;
+  return x >= r.x - slack && x < r.x + r.w + slack && y >= r.y - slack && y < r.y + r.h + slack;
+}
+// Bottom-left switch: bell and "Sound on" / "Sound off" (or why there's no sound).
+static void poSoundSwitch(const UiState& s) {
+  if (s.sound < 0) return;
+  const Rect& r = PO_SOUND_BTN;
+  bool on = s.sound == 1 && !s.soundMissing;
+  uint32_t col = s.alarmSounding ? C_NO : on ? C_GO : C_IDLE;
+  spr.fillSmoothRoundRect(r.x, r.y, r.w, r.h, r.h / 2, c565(blend(C_BG, col, 0.18f)));
+  spr.drawRoundRect(r.x, r.y, r.w, r.h, r.h / 2, c565(col));
+  // bell
+  int bx = r.x + 15, by = r.y + r.h / 2;
+  spr.fillSmoothCircle(bx, by - 2, 6, c565(col));
+  spr.fillRect(bx - 6, by - 2, 13, 6, c565(col));
+  spr.fillRect(bx - 8, by + 3, 17, 2, c565(col));
+  spr.fillSmoothCircle(bx, by + 7, 2, c565(col));
+  if (!on) spr.drawLine(bx - 9, by + 8, bx + 9, by - 9, c565(C_BG)), spr.drawLine(bx - 8, by + 9, bx + 9, by - 8, c565(col));
+  const char* t = s.alarmSounding ? "Tap: silence" : s.soundMissing && s.sound == 1 ? "No buzzer" : on ? "Sound on" : "Sound off";
+  text(t, r.x + 30, by, fSmall, col, middle_left, r.w - 36);
+}
+
+bool uiPoAckHit(int x, int y) {
+  const Rect& r = PO_ACK_BTN; const int slack = 12;
+  return x >= r.x - slack && x < r.x + r.w + slack && y >= r.y - slack && y < r.y + r.h + slack;
+}
+
+void uiDrawNotifications(const UiState& s, const PoInbox& in, bool linked, const String& deviceName, const String& settingsUrl) {
+  spr.fillScreen(c565(C_BG));
+  bool trouble = in.state == PO_STOPPED || in.state == PO_RETRYING || in.state == PO_CONNECTING;
+  char hb[48];
+  if (in.state == PO_STOPPED) snprintf(hb, sizeof hb, "Notifications stopped");
+  else if (in.state == PO_RETRYING) snprintf(hb, sizeof hb, "Reconnecting...");
+  else if (in.state == PO_CONNECTING) snprintf(hb, sizeof hb, "Connecting...");
+  else snprintf(hb, sizeof hb, "Notifications");
+  header(s, hb, in.state == PO_STOPPED);
+
+  if (!linked) {
+    text("Notifications not set up", W / 2, OY + 110, fTitle, C_FG, top_center);
+    text("Link this display to your Pushover account", W / 2, OY + 156, fBody, C_MUTED, top_center, W - 40);
+    text(("on the settings page: " + settingsUrl).c_str(), W / 2, OY + 184, fBody, C_MUTED, top_center, W - 40);
+    spr.pushSprite(0, 0);
+    return;
+  }
+  if (!in.n) {
+    text("No notifications yet", W / 2, OY + 110, fTitle, C_FG, top_center);
+    String l1 = "Send to device \"" + deviceName + "\" from Pushover.";
+    text(l1.c_str(), W / 2, OY + 156, fBody, C_MUTED, top_center, W - 40);
+    if (in.state == PO_STOPPED && in.error.length()) wrapParas(in.error.c_str(), 40, OY + 190, W - 80, fBody, C_MAYBE, 24, 3);
+    poSoundSwitch(s);
+    spr.pushSprite(0, 0);
+    return;
+  }
+
+  int idx = constrain(s.poIndex, 0, in.n - 1);
+  const PoMsg& m = in.msg[idx];
+  uint32_t pc = poColor(m.priority);
+  bool needAck = m.priority >= 2 && !m.acked;
+  // ---- the message in full ----
+  const int x = 12, y = PO_CARD_Y, w = W - 24, hgt = PO_CARD_B - PO_CARD_Y;
+  spr.fillSmoothRoundRect(x, y, w, hgt, 10, c565(needAck ? blend(C_TILE, C_NO, 0.12f) : C_TILE));
+  spr.drawRoundRect(x, y, w, hgt, 10, c565(needAck ? C_NO : C_LINE));
+  spr.fillRoundRect(x + 6, y + 10, 5, hgt - 20, 2, c565(pc));
+  char when[24]; poWhen(when, sizeof when, m.date, s.nowUtc);
+  spr.setFont(&fBody.font); int ww = spr.textWidth(when);
+  text(when, x + w - 14, y + 12, fBody, C_MUTED, top_right);
+  const char* title = m.title[0] ? m.title : m.app;
+  text(title, x + 22, y + 10, fBodyB, C_FG, top_left, w - 50 - ww);
+  int ty = y + 38;
+  if (m.title[0] && m.app[0] && strcmp(m.title, m.app)) {
+    text(m.app, x + 22, ty, fSmall, C_MUTED, top_left, w - 50);
+    ty += 20;
+  }
+  int bottom = (needAck ? PO_ACK_BTN.y - 6 : y + hgt - 22);
+  int lines = max(1, (bottom - ty) / 24);
+  wrapParas(m.text, x + 22, ty + 2, w - 40, fBody, C_FG, 24, lines);
+  if (needAck) {
+    const Rect& r = PO_ACK_BTN;
+    spr.fillSmoothRoundRect(r.x, r.y, r.w, r.h, 8, c565(C_NO));
+    text("Acknowledge", r.x + r.w / 2, r.y + r.h / 2, fBodyB, C_BG, middle_center, r.w - 12);
+    text("Emergency: tap to acknowledge", r.x + r.w + 14, r.y + r.h / 2, fSmall, C_NO, middle_left, x + w - (r.x + r.w + 28));
+  } else if (m.priority >= 2) {
+    text("Acknowledged", x + 22, y + hgt - 22, fSmall, C_MUTED, top_left);
+  }
+  char pos[16]; snprintf(pos, sizeof pos, "%d / %d", idx + 1, in.n);
+  text(pos, x + w - 14, y + hgt - 22, fSmall, C_IDLE, top_right);
+
+  // ---- the next ones, one line each ----
+  for (int r = 0; r < PO_ROWS && idx + 1 + r < in.n; r++) {
+    const PoMsg& o = in.msg[idx + 1 + r];
+    int ry = PO_CARD_B + 6 + r * PO_ROW_H;
+    if (r) spr.drawFastHLine(24, ry - 1, W - 48, c565(C_LINE));
+    spr.fillSmoothCircle(26, ry + PO_ROW_H / 2, 4, c565(poColor(o.priority)));
+    char ow[24]; poWhen(ow, sizeof ow, o.date, s.nowUtc);
+    text(ow, 40, ry + PO_ROW_H / 2, fSmall, C_MUTED, middle_left, 86);
+    const char* ot = o.title[0] ? o.title : o.app;
+    int tw = textFit(ot, 130, ry + PO_ROW_H / 2, fBody, fSmall, C_FG, middle_left, 150);
+    String first = o.text; int nl = first.indexOf('\n'); if (nl >= 0) first = first.substring(0, nl);
+    text(first.c_str(), 130 + tw + 12, ry + PO_ROW_H / 2, fSmall, C_MUTED, middle_left, W - 24 - (130 + tw + 12));
+  }
+  text(in.n > 1 ? "Tap for the next message" : "", W / 2, H - 20, fSmall, C_IDLE, top_center);
+  if (trouble && in.state == PO_STOPPED && in.error.length()) text(in.error.c_str(), W / 2, H - 20, fSmall, C_MAYBE, top_center, W - 24);
+  poSoundSwitch(s);
+  spr.pushSprite(0, 0);
 }
 
 // Escape ; , : \ and " for the WIFI: QR format.

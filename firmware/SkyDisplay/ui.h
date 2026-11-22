@@ -3,6 +3,7 @@
 #include "astro.h"
 #include "weather.h"
 #include "obs.h"
+#include "po.h"
 
 struct UiState {
   const Forecast* f = nullptr;
@@ -18,12 +19,17 @@ struct UiState {
   int dotIndex = 0, dotCount = 3;  // header dots: position of this screen in the swipe order
   int rigPage = 0;          // observatory screen: which two rigs are shown
   bool wxText = false;      // weather screen on the small display: text forecast shown in place of the day strip
+  int poIndex = 0;          // notifications screen: which message is shown in full
+  int dotAlert = -1;        // header dot drawn amber (the notifications screen, while messages are unread)
+  int sound = -1;           // notifications screen sound switch: -1 not shown (no sound on this board), 0 off, 1 on
+  bool soundMissing = false;  // the board has sound but its hardware didn't answer
+  bool alarmSounding = false;
 };
 
 static const int FOOTER_PAGES = 3;
 
-// Screens. Swipe order is forecast, weather, observatory (when turned on), status.
-enum Screen { SCREEN_FORECAST = 0, SCREEN_WEATHER = 1, SCREEN_STATUS = 2, SCREEN_OBS = 3, SCREEN_COUNT = 4 };
+// Screens. Swipe order is forecast, weather, observatory and notifications (each when turned on), status.
+enum Screen { SCREEN_FORECAST = 0, SCREEN_WEATHER = 1, SCREEN_STATUS = 2, SCREEN_OBS = 3, SCREEN_PO = 4, SCREEN_COUNT = 5 };
 static const int OBS_RIGS_PER_PAGE = 2;
 
 // Status screen content, filled in by the main sketch.
@@ -43,6 +49,11 @@ void uiDrawStatus(const UiState& s, const StatusInfo& st); // status screen
 void uiDrawWeather(const UiState& s, const Weather& w, bool configured, const String& settingsUrl);
 // Observatory screen.
 void uiDrawObservatory(const UiState& s, const Observatory& o, const String& settingsUrl);
+// Notifications screen: the message at s.poIndex in full, the next ones as a list. linked = the display is a
+// device on a Pushover account.
+void uiDrawNotifications(const UiState& s, const PoInbox& in, bool linked, const String& deviceName, const String& settingsUrl);
+bool uiPoAckHit(int x, int y);    // that point is on the notifications screen's "Acknowledge" button
+bool uiPoSoundHit(int x, int y);  // ... or on its sound on/off switch
 // Wi-Fi setup: QR code to join the setup network (open, no password) and QR code for the setup page.
 void uiWifiSetupScreen(const char* apName, const String& setupUrl);
 // First run after Wi-Fi: QR code for the settings page, to add the chart and time zone.

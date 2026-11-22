@@ -37,7 +37,7 @@ void settingsLoad() {
   cfg.nightFrom     = prefs.getInt("nightFrom", d.nightFrom);
   cfg.nightTo       = prefs.getInt("nightTo", d.nightTo);
   cfg.footerSeconds = prefs.getInt("footSec", d.footerSeconds);
-  cfg.startScreen = constrain(prefs.getInt("startScr", d.startScreen), 0, 3);
+  cfg.startScreen = constrain(prefs.getInt("startScr", d.startScreen), 0, 4);
   cfg.goodMaxCloud  = prefs.getInt("goodCloud", d.goodMaxCloud);
   cfg.goodMinTrans  = prefs.getInt("goodTrans", d.goodMinTrans);
   cfg.goMinHours    = prefs.getInt("goHours", d.goMinHours);
@@ -55,6 +55,13 @@ void settingsLoad() {
     cfg.rigHost[i] = prefs.getString(("rH" + String(i)).c_str(), "");
     cfg.rigPark[i] = prefs.getString(("rP" + String(i)).c_str(), "");
   }
+  cfg.poEnabled     = prefs.getBool("poEn", d.poEnabled);
+  cfg.poWake        = constrain(prefs.getInt("poWake", d.poWake), 0, 2);
+  cfg.poSecret      = prefs.getString("poSec", "");
+  cfg.poDevice      = prefs.getString("poDev", "");
+  cfg.poDeviceName  = prefs.getString("poName", "");
+  cfg.alarmLevel    = constrain(prefs.getInt("alLevel", d.alarmLevel), 0, 2);
+  cfg.soundArmed    = prefs.getBool("armed", d.soundArmed);
   cfg.hostname      = prefs.getString("host", d.hostname);
   cfg.webPassword   = prefs.getString("webPass", d.webPassword);
   prefs.end();
@@ -96,6 +103,13 @@ void settingsSave() {
     prefs.putString(("rH" + String(i)).c_str(), cfg.rigHost[i]);
     prefs.putString(("rP" + String(i)).c_str(), cfg.rigPark[i]);
   }
+  prefs.putBool("poEn", cfg.poEnabled);
+  prefs.putInt("poWake", cfg.poWake);
+  prefs.putString("poSec", cfg.poSecret);
+  prefs.putString("poDev", cfg.poDevice);
+  prefs.putString("poName", cfg.poDeviceName);
+  prefs.putInt("alLevel", cfg.alarmLevel);
+  prefs.putBool("armed", cfg.soundArmed);
   prefs.putString("host", cfg.hostname);
   prefs.putString("webPass", cfg.webPassword);
   prefs.end();

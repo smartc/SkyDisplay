@@ -4,10 +4,11 @@
 // whether now, tonight and tomorrow night are worth setting up the rigs.
 // Settings page: http://skydisplay.local/ (or the IP shown in the serial log).
 //
-// Screens (swipe left/right): forecast, weather (Weather Underground), observatory (when turned on), status.
-// Touch: tap = next footer page (status screen: "Refresh now" button), long press = dim.
+// Screens (swipe left/right): forecast, weather (Weather Underground), observatory and notifications (Pushover;
+// each when turned on), status.
+// Touch: tap = next footer page (status screen: "Refresh now" button; notifications: next message), long press = dim.
 // Serial commands (115200 on the WT32, 460800 on the Indicator): s = screenshot dump, r = check chart and weather now, d = dump decoded rows,
-//   a = sun/moon times, n = next screen, i = info, W = forget Wi-Fi and restart.
+//   a = sun/moon times, n = next screen, 0-4 = show a screen, i = info, W = forget Wi-Fi and restart.
 
 #include <WiFi.h>
 #include <WiFiManager.h>
@@ -24,6 +25,8 @@
 #include "tls.h"
 #include "obs.h"
 #include "cache.h"
+#include "po.h"
+#include "sound.h"
 
 static Forecast fc;
 static UiState ui;
@@ -44,6 +47,7 @@ static uint32_t wxSavedMs = 0;             // last weather save to flash
 static const uint32_t WX_SAVE_MS = 30UL * 60000;  // current conditions alone are saved at most this often (flash wear)
 static volatile bool refreshPending = false;      // "Refresh now" tapped on the status screen; cleared by the next chart check
 static uint32_t refreshTapMs = 0;
+static uint32_t poSeenId = 0;  // newest notification the loop has reacted to (wake, switch screen)
 static volatile uint32_t nextCheckMs = 0;  // shared with the network task
 static uint32_t nextDrawMs = 0, nextSkyMs = 0, lastTouchMs = 0;
 static bool manualDim = false;
@@ -98,6 +102,17 @@ static void buildStatus(StatusInfo& st) {
   else if (wx.error.length()) R("WEATHER", wx.error, true);
   else if (wx.wuError.length()) R("WEATHER", wx.wuError, true);
   else R("WEATHER", (weatherUsesEcowitt() ? String("EcoWitt") : cfg.wuStation) + (wx.haveCurrent ? ", " + fmtLocal(wx.obsUtc, "%H:%M") : String(", waiting")));
+  if (cfg.poEnabled) {
+    bool linked = cfg.poSecret.length() && cfg.poDevice.length();
+    String v = linked ? poStateText() : String("Not linked");
+    bool soundTrouble = false;
+#if BOARD_HAS_SOUND
+    v += cfg.soundArmed && cfg.alarmLevel ? ", sound on" : ", silent";
+    soundTrouble = cfg.soundArmed && cfg.alarmLevel && !soundReady();
+    if (soundTrouble) v = soundStatus();
+#endif
+    R("NOTIFICATIONS", v, !linked || poInbox.state == PO_STOPPED || soundTrouble);
+  }
   st.qrUrl = "http://" + WiFi.localIP().toString() + "/";
   st.refreshing = refreshPending && millis() - refreshTapMs < 60000;  // gives up on the label after a minute (no Wi-Fi)
 }
@@ -106,24 +121,39 @@ static void buildStatus(StatusInfo& st) {
 static int screenOrder(int* out) {
   int n = 0; out[n++] = SCREEN_FORECAST; out[n++] = SCREEN_WEATHER;
   if (cfg.obsEnabled) out[n++] = SCREEN_OBS;
+  if (cfg.poEnabled) out[n++] = SCREEN_PO;
   out[n++] = SCREEN_STATUS; return n;
 }
-static int homeScreen() { return (cfg.startScreen == SCREEN_OBS && !cfg.obsEnabled) ? SCREEN_FORECAST : cfg.startScreen; }
+static bool screenOn(int s) { return (s != SCREEN_OBS || cfg.obsEnabled) && (s != SCREEN_PO || cfg.poEnabled); }
+static int homeScreen() { return screenOn(cfg.startScreen) ? cfg.startScreen : SCREEN_FORECAST; }
+// An emergency notification nobody has acknowledged yet keeps the notifications screen up.
+static bool poEmergencyWaiting() {
+  if (!cfg.poEnabled) return false;
+  for (int i = 0; i < poInbox.n; i++) if (poInbox.msg[i].priority >= 2 && !poInbox.msg[i].acked) return true;
+  return false;
+}
 static void stepScreen(int d) {
   int ord[SCREEN_COUNT]; int n = screenOrder(ord), pos = 0;
   for (int i = 0; i < n; i++) if (ord[i] == ui.screen) pos = i;
   ui.screen = ord[(pos + d + n) % n];
   ui.wxText = false;  // the weather screen always opens on the day strip
+  ui.poIndex = 0;     // and notifications on the newest message
 }
 
 static void drawScreen() {
   ui.nowUtc = nowUtc();
-  { int ord[SCREEN_COUNT]; ui.dotCount = screenOrder(ord); ui.dotIndex = 0; for (int i = 0; i < ui.dotCount; i++) if (ord[i] == ui.screen) ui.dotIndex = i; }
+  if (ui.screen == SCREEN_PO) poInbox.unread = 0;  // seen
+  ui.sound = BOARD_HAS_SOUND ? (cfg.soundArmed ? 1 : 0) : -1;
+  ui.soundMissing = BOARD_HAS_SOUND && !soundReady();
+  ui.alarmSounding = soundAlarmOn();
+  { int ord[SCREEN_COUNT]; ui.dotCount = screenOrder(ord); ui.dotIndex = 0; ui.dotAlert = -1;
+    for (int i = 0; i < ui.dotCount; i++) { if (ord[i] == ui.screen) ui.dotIndex = i; if (ord[i] == SCREEN_PO && poInbox.unread) ui.dotAlert = i; } }
   ui.needsSetup = !chartTarget().ok;  // fresh device: show the first-run QR code instead of the forecast
   ui.settingsUrl = "http://" + WiFi.localIP().toString() + "/";
   if (ui.screen == SCREEN_STATUS) { StatusInfo st; buildStatus(st); uiDrawStatus(ui, st); }
   else if (ui.screen == SCREEN_WEATHER) uiDrawWeather(ui, wx, weatherConfigured(), "http://" + WiFi.localIP().toString() + "/");
   else if (ui.screen == SCREEN_OBS) uiDrawObservatory(ui, obs, "http://" + WiFi.localIP().toString() + "/");
+  else if (ui.screen == SCREEN_PO) uiDrawNotifications(ui, poInbox, cfg.poSecret.length() && cfg.poDevice.length(), cfg.poDeviceName, ui.settingsUrl);
   else uiDraw(ui);
 }
 
@@ -326,7 +356,7 @@ static void restoreCache() {
 }
 
 // ---------- web hooks ----------
-static void webCheckNow() { nextCheckMs = 0; nextWxMs[0] = nextWxMs[2] = millis(); nextObsMs = millis(); }  // history only seeds once
+static void webCheckNow() { nextCheckMs = 0; nextWxMs[0] = nextWxMs[2] = millis(); nextObsMs = millis(); poSyncNow(); }  // history only seeds once
 static void webApply(bool chartChanged, bool timeChanged) {
   if (chartChanged) { fc.valid = false; netForgetEtag(); nextCheckMs = 0; }
   if (timeChanged) { applyTime(); nextSkyMs = 0; }
@@ -337,7 +367,7 @@ static void webApply(bool chartChanged, bool timeChanged) {
   nextDrawMs = 0;
 }
 static void webShowScreen(int s) {
-  if (s < 0 || s >= SCREEN_COUNT || (s == SCREEN_OBS && !cfg.obsEnabled)) return;
+  if (s < 0 || s >= SCREEN_COUNT || !screenOn(s)) return;
   ui.screen = s; lastTouchMs = millis(); drawScreen();
 }
 static String webStatus() {
@@ -448,6 +478,8 @@ void setup() {
   ui.f = &fc;
   ui.screen = homeScreen();
   if (cfg.obsEnabled) obsBegin();
+  poBegin();  // idles until the notifications screen is turned on and linked
+  soundBegin();
   lastTouchMs = millis();
   // Network work (chart + weather) on core 0, so drawing and touch on core 1 never wait for it.
   xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, nullptr, 0);
@@ -468,6 +500,8 @@ void loop() {
   if (loopStartMs) perfMaxLoop = max(perfMaxLoop, millis() - loopStartMs - 10);  // minus the delay(10) at the end
   loopStartMs = millis();
   { DataGuard g; webLoop(); }
+  soundLoop();
+  { static bool was = false; bool on = soundAlarmOn(); if (on != was) { was = on; nextDrawMs = 0; skipAdvance = true; } }  // redraw the switch
 
   if (Serial.available()) {
     int c = Serial.read();
@@ -481,7 +515,7 @@ void loop() {
     else if (c == 'd') dumpRows();
     else if (c == 'a') printSky();
     else if (c == 'n') { stepScreen(1); lastTouchMs = millis(); drawScreen(); }  // next screen (testing)
-    else if (c >= '0' && c <= '3') { ui.screen = c - '0'; lastTouchMs = millis(); if (ui.screen == SCREEN_OBS) nextObsMs = millis(); drawScreen(); }  // jump to a screen (testing)
+    else if (c >= '0' && c <= '4') { ui.screen = c - '0'; lastTouchMs = millis(); if (ui.screen == SCREEN_OBS) nextObsMs = millis(); drawScreen(); }  // jump to a screen (testing)
     // Previews of the setup screens (testing); the next redraw returns to normal.
     else if (c == 'q') { uiWifiSetupScreen(SETUP_AP_NAME, "http://192.168.4.1/"); nextDrawMs = millis() + 15000; }
     else if (c == 'Q') { UiState p = ui; p.nowUtc = nowUtc(); p.settingsUrl = "http://" + WiFi.localIP().toString() + "/"; uiFirstRunScreen(p); nextDrawMs = millis() + 15000; }
@@ -496,12 +530,32 @@ void loop() {
   }
 
   if (chartJustUpdated) { chartJustUpdated = false; DataGuard g; updateSky(); }
+  if (poInbox.newestId != poSeenId) {  // new notification(s)
+    DataGuard g;
+    poSeenId = poInbox.newestId;
+    int pri = poInbox.newestPriority;
+    bool show = cfg.poEnabled && (cfg.poWake == 2 || (cfg.poWake == 1 && pri >= 1) || pri >= 2);
+    // Sound: only fresh messages count (newestPriority ignores a backlog); quiet hours don't apply.
+    if (cfg.poEnabled && cfg.soundArmed) {
+      if (pri >= 2 && cfg.alarmLevel >= 1) { soundAlarm(); Serial.println("[main] alarm sounding"); }
+      else if (pri == 1 && cfg.alarmLevel == 2) soundChime();
+    }
+    if (show) {
+      ui.screen = SCREEN_PO; ui.poIndex = 0;
+      lastTouchMs = millis(); manualDim = false;
+      nightWakeUntilMs = millis() + (uint32_t)max(1, cfg.idleMinutes) * 60000UL;
+      Serial.printf("[main] notification (priority %d): showing it\n", pri);
+    } else if (ui.screen == SCREEN_PO) ui.poIndex = 0;
+    nextDrawMs = 0; skipAdvance = true;
+  }
   if (redrawNeeded) { redrawNeeded = false; if (ui.screen != SCREEN_FORECAST || fc.valid) { nextDrawMs = 0; skipAdvance = true; } }
   if ((int32_t)(millis() - nextSkyMs) >= 0) { DataGuard g; updateSky(); nextDrawMs = 0; skipAdvance = true; }
 
   // Touch: tap = next footer page (or wake, if dimmed); long press = toggle dim.
   TouchEvent te = uiTouchEvent();
   if (te != TOUCH_NONE) {
+    bool silenced = soundAlarmOn();  // the first touch silences an alarm (the message stays until acknowledged)
+    if (silenced) { soundStop(); Serial.println("[main] touch: alarm silenced"); }
     bool dimmed = currentBacklight < cfg.brightness;  // idle, off, night hours or long-press dim
     lastTouchMs = millis();
     // While night dimming applies, any touch keeps the screen bright for the idle period (at least a minute).
@@ -527,6 +581,16 @@ void loop() {
         ui.rigPage++;  // next two rigs (wraps when drawn)
       } else if (ui.screen == SCREEN_WEATHER) {
         ui.wxText = !ui.wxText;  // small screen: text forecast <-> day strip (the square screen shows both)
+      } else if (ui.screen == SCREEN_PO) {
+        int tx, ty; uiTapPoint(tx, ty);
+        DataGuard g;
+        int idx = constrain(ui.poIndex, 0, max(0, poInbox.n - 1));
+        bool needAck = poInbox.n && poInbox.msg[idx].priority >= 2 && !poInbox.msg[idx].acked;
+        if (BOARD_HAS_SOUND && uiPoSoundHit(tx, ty)) {  // sound on/off switch
+          if (!silenced) { cfg.soundArmed = !cfg.soundArmed; settingsSave(); Serial.printf("[main] tap: sound %s\n", cfg.soundArmed ? "on" : "off"); }
+        }
+        else if (needAck && uiPoAckHit(tx, ty)) { poAcknowledge(idx); Serial.println("[main] tap: acknowledge"); }
+        else if (poInbox.n && !silenced) ui.poIndex = (idx + 1) % poInbox.n;  // next message (wraps)
       } else if (ui.screen == SCREEN_STATUS) {
         int tx, ty; uiTapPoint(tx, ty);
         if (uiStatusRefreshHit(tx, ty)) {  // same as "Check chart and weather now" on the settings page
@@ -547,8 +611,10 @@ void loop() {
   if (bl != currentBacklight) { uiSetBacklight(bl); currentBacklight = bl; }
 
   // Footer rotation: advance a page, then draw. A tap already drew, so it skips one advance.
-  if (ui.screen != homeScreen() && millis() - lastTouchMs > SCREEN_RETURN_MS) { ui.screen = homeScreen(); ui.wxText = false; nextDrawMs = 0; }
-  if (ui.screen == SCREEN_OBS && !cfg.obsEnabled) ui.screen = SCREEN_FORECAST;  // turned off on the settings page
+  if (ui.screen != homeScreen() && millis() - lastTouchMs > SCREEN_RETURN_MS && !(ui.screen == SCREEN_PO && poEmergencyWaiting())) {
+    ui.screen = homeScreen(); ui.wxText = false; ui.poIndex = 0; nextDrawMs = 0;
+  }
+  if (!screenOn(ui.screen)) ui.screen = SCREEN_FORECAST;  // turned off on the settings page
   if (webUpdating()) { delay(10); return; }  // keep the update message on screen
   if ((int32_t)(millis() - nextDrawMs) >= 0) {
     if (!skipAdvance && ui.screen == SCREEN_FORECAST) ui.footerPage = (ui.footerPage + 1) % FOOTER_PAGES;

@@ -9,6 +9,8 @@
 #include "board.h"
 #include "ui.h"
 #include "obs.h"
+#include "po.h"
+#include "sound.h"
 
 static WebServer server(80);
 static WebHooks hooks;
@@ -61,6 +63,17 @@ static void handleRoot() {
   h += esc(hooks.statusLine());
   h += F("</div></header>");
   if (server.hasArg("saved")) h += F("<section><b>Saved.</b> Changes are applied now.</section>");
+  if (server.hasArg("po")) {  // result of linking or unlinking the notifications screen
+    String m = server.arg("po");
+    bool ok = m == "linked" || m == "unlinked" || m == "cleared";
+    h += "<section" + String(ok ? "" : " style='border-color:var(--warn)'") + "><b>Notifications:</b> ";
+    if (m == "linked") h += F("this display is now a device on your Pushover account. Turn on the screen below if it isn't.");
+    else if (m == "unlinked") h += F("unlinked. The device stays listed in your Pushover account until you delete it there.");
+    else if (m == "cleared") h += F("stored messages cleared.");
+    else if (m == "2fa") h += F("your account uses two-factor login. Enter the code from your authenticator app with your email and password, then link again.");
+    else h += esc(m);
+    h += F("</section>");
+  }
 
   h += F("<form method='post' action='/save'><section><h2>Clear Sky Chart</h2><div class='grid'>"
          "<label style='grid-column:1/-1'>Chart ID or chart page URL<input name='chartUrl' autocapitalize='none' autocorrect='off' autocomplete='off' spellcheck='false' value='");
@@ -124,7 +137,7 @@ static void handleRoot() {
   h += F("'></label><label>Footer rotation (seconds)<input type='number' min='2' max='30' name='footSec' value='");
   h += String(cfg.footerSeconds);
   h += F("'></label><label>Start-up screen<select name='startScr'>");
-  h += opt(0, cfg.startScreen, "Clear Dark Sky") + opt(1, cfg.startScreen, "Weather") + opt(3, cfg.startScreen, "Observatory") + opt(2, cfg.startScreen, "Status");
+  h += opt(0, cfg.startScreen, "Clear Dark Sky") + opt(1, cfg.startScreen, "Weather") + opt(3, cfg.startScreen, "Observatory") + opt(4, cfg.startScreen, "Notifications") + opt(2, cfg.startScreen, "Status");
   h += F("</select><span class='hint'>Also where the display goes back to after 2 minutes untouched.</span></label></div></section>");
 
   h += F("<section><h2>Scoring</h2><div class='grid'><label>Good hour: cloud up to (%)<input type='number' min='0' max='60' name='goodCloud' value='");
@@ -215,6 +228,49 @@ static void handleRoot() {
          "b.onclick=()=>{document.getElementById(id).value=d.addr;b.textContent='Set';};row.appendChild(b);}f.appendChild(row);}}"
          "catch(e){m.textContent='Search failed: '+e;}});</script>");
 
+  // ---- notifications (unofficial Pushover Open Client) ----
+  // The link fields belong to a separate form (#poLink, after the main form) through their form= attribute.
+  bool poLinked = cfg.poSecret.length() && cfg.poDevice.length();
+  h += F("<section><h2>Notifications</h2><div class='grid'><label class='check' style='grid-column:1/-1'><input type='checkbox' name='poEn' value='1'");
+  if (cfg.poEnabled) h += F(" checked");
+  h += F("> Show the notifications screen</label><label>When a message arrives<select name='poWake'>");
+  h += opt(0, cfg.poWake, "Count it, don't wake the screen") + opt(1, cfg.poWake, "High priority: wake and show it") + opt(2, cfg.poWake, "Always wake and show it");
+  h += F("</select><span class='hint'>Emergency messages stay until you tap to acknowledge them.</span></label><div><span class='hint'>Status</span><div>");
+  {
+    DataGuard g;
+    h += poLinked ? "Linked as <b>" + esc(cfg.poDeviceName) + "</b>, " + esc(poStateText()) : String("Not linked");
+  }
+  h += F("</div></div>");
+#if BOARD_HAS_SOUND
+  h += F("<label>Alarm sound for<select name='alLevel'>");
+  h += opt(1, cfg.alarmLevel, "Emergency messages") + opt(2, cfg.alarmLevel, "High priority and emergency") + opt(0, cfg.alarmLevel, "Nothing (silent)");
+  h += F("</select><span class='hint'>Emergency: beep-beep every 3 s until you tap the screen (5 minutes at most). High priority: one short chime.</span></label>"
+         "<label class='check'><input type='checkbox' name='armed' value='1'");
+  if (cfg.soundArmed) h += F(" checked");
+  h += F("> Sound on <span class='hint'>(also switched on the notifications screen)</span></label><div><span class='hint'>Buzzer</span><div>");
+  h += esc(soundStatus());
+  h += F("</div></div>");
+#endif
+  if (!poLinked) {
+    String def; for (char c : cfg.hostname) if (isalnum((uint8_t)c) || c == '-' || c == '_') def += c;
+    h += F("<p class='hint' style='grid-column:1/-1;margin:0'>The display shows messages sent to your <a href='https://pushover.net' style='color:var(--accent)'>Pushover</a>"
+           " account by registering as a device on it. Pushover licenses this like a desktop client: free for 30 days, then a one-time"
+           " Pushover for Desktop licence (from pushover.net) covers it. Your password is used once to log in and is not stored."
+           " SkyDisplay is an unofficial Open Client, not released or supported by Pushover.</p>"
+           "<label>Pushover email<input form='poLink' name='email' type='email' autocomplete='username' autocapitalize='none'></label>"
+           "<label>Password<input form='poLink' name='pass' type='password' autocomplete='current-password'></label>"
+           "<label>Two-factor code (if you use it)<input form='poLink' name='twofa' inputmode='numeric' autocomplete='one-time-code'></label>"
+           "<label>Device name<input form='poLink' name='name' maxlength='25' pattern='[A-Za-z0-9_-]{1,25}' value='");
+    h += esc(def.substring(0, 25));
+    h += F("'><span class='hint'>How the display appears in Pushover; letters, numbers, - and _ only. Send to it by name.</span></label>"
+           "<div class='row' style='grid-column:1/-1'><button type='submit' form='poLink'>Link this display</button>"
+           "<span class='hint'>Takes a few seconds.</span></div>");
+  } else {
+    h += F("<div class='row' style='grid-column:1/-1'><button type='submit' form='poUnlink' class='warn'>Unlink</button>"
+           "<button type='submit' form='poClear'>Clear stored messages</button></div>");
+  }
+  h += F("</div></section>");
+
   h += F("<section><h2>Device</h2><div class='grid'><label>Network name (hostname)<input name='host' value='");
   h += esc(cfg.hostname);
   h += F("'><span class='hint'>Settings page at http://NAME/ or http://NAME.local after a restart.</span></label>"
@@ -222,7 +278,9 @@ static void handleRoot() {
   h += cfg.webPassword.length() ? "(unchanged)" : "(none)";
   h += F("'><span class='hint'>User name is admin. Leave blank to keep the current one.</span></label>"
          "<label class='check'><input type='checkbox' name='clearPass' value='1'> Remove the password</label>"
-         "</div></section><div class='row'><button class='primary' type='submit'>Save settings</button></div></form>");
+         "</div></section><div class='row'><button class='primary' type='submit'>Save settings</button></div></form>"
+         "<form id='poLink' method='post' action='/pushover/link'></form><form id='poUnlink' method='post' action='/pushover/unlink'></form>"
+         "<form id='poClear' method='post' action='/pushover/clear'></form>");
 
   h += F("<section><h2>Wi-Fi</h2><table><tr><td>Network</td><td>");
   h += esc(WiFi.SSID());
@@ -276,6 +334,11 @@ static int argInt(const char* n, int lo, int hi, int def) {
   return constrain(server.arg(n).toInt(), lo, hi);
 }
 static void redirect(const char* to) { server.sendHeader("Location", to); server.send(303, "text/plain", ""); }
+static String urlParam(const String& v) {  // percent-encode for a query string
+  String o;
+  for (char c : v) { if (isalnum((uint8_t)c) || c == '-' || c == '_' || c == '.') o += c; else { char b[4]; snprintf(b, sizeof b, "%%%02X", (uint8_t)c); o += b; } }
+  return o;
+}
 
 static void handleSave() {
   if (!authOk()) return;
@@ -302,7 +365,15 @@ static void handleSave() {
   cfg.nightFrom = argInt("nightFrom", 0, 23, cfg.nightFrom);
   cfg.nightTo = argInt("nightTo", 0, 23, cfg.nightTo);
   cfg.footerSeconds = argInt("footSec", 2, 30, cfg.footerSeconds);
-  cfg.startScreen = argInt("startScr", 0, 3, cfg.startScreen);
+  cfg.startScreen = argInt("startScr", 0, 4, cfg.startScreen);
+  bool poWas = cfg.poEnabled;
+  cfg.poEnabled = server.hasArg("poEn");
+  cfg.poWake = argInt("poWake", 0, 2, cfg.poWake);
+#if BOARD_HAS_SOUND
+  cfg.alarmLevel = argInt("alLevel", 0, 2, cfg.alarmLevel);
+  cfg.soundArmed = server.hasArg("armed");
+  if (!cfg.soundArmed) soundStop();
+#endif
   cfg.obsEnabled = server.hasArg("obsEn");
   cfg.obsRoof = arg("oRoof"); cfg.obsSafety = arg("oSafe"); cfg.obsRain = arg("oRain"); cfg.obsSky = arg("oSky");
   {
@@ -327,6 +398,7 @@ static void handleSave() {
   else if (server.arg("webPass").length()) cfg.webPassword = server.arg("webPass");
   settingsSave();
   if (cfg.obsEnabled) obsBegin();
+  if (cfg.poEnabled != poWas) poRestart();
   bool chartChanged = cfg.chartUrl != oldUrl;
   bool timeChanged = cfg.tz != oldTz || cfg.ntp1 != oldN1 || cfg.ntp2 != oldN2 || cfg.ntpHours != oldNtpHours
                   || cfg.lat != oldLat || cfg.lon != oldLon;
@@ -364,6 +436,16 @@ void webBegin(const WebHooks& h) {
   server.on("/wifi", HTTP_POST, handleWifi);
   server.on("/forget", HTTP_POST, handleForget);
   server.on("/check", HTTP_POST, [] { if (!authOk()) return; hooks.checkNow(); redirect("/"); });
+  // Notifications: link this display to a Pushover account (the password is passed on once, never stored), unlink, clear.
+  server.on("/pushover/link", HTTP_POST, [] {
+    if (!authOk()) return;
+    String name = server.arg("name"); name.trim();
+    if (!name.length()) name = cfg.hostname;
+    String r = poLink(server.arg("email"), server.arg("pass"), server.arg("twofa"), name.substring(0, 25));
+    redirect(("/?po=" + urlParam(r.length() ? r : String("linked"))).c_str());
+  });
+  server.on("/pushover/unlink", HTTP_POST, [] { if (!authOk()) return; poUnlink(); redirect("/?po=unlinked"); });
+  server.on("/pushover/clear", HTTP_POST, [] { if (!authOk()) return; poClear(); redirect("/?po=cleared"); });
   server.on("/restart", HTTP_POST, [] { if (!authOk()) return; server.send(200, "text/plain", "Restarting..."); delay(500); ESP.restart(); });
   // Firmware upload (ElegantOTA at /update, framed by /firmware). Same password as the settings page (user admin), if set.
   server.on("/firmware", HTTP_GET, handleFirmware);
