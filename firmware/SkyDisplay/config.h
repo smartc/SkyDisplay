@@ -1,8 +1,9 @@
 #pragma once
 // Fixed constants. Anything a user might change lives in settings.h and the web page.
 
-#define FIRMWARE_VERSION "0.8.1"   // the only place the version is set; bump it with every release
+#define FIRMWARE_VERSION "0.8.2"   // the only place the version is set; bump it with every release
 #define REPO_URL "https://github.com/smartc/SkyDisplay"   // shown (and as a QR code) on the About screen
+#define DDA_URL  "https://darkdragonsastro.com"           // Dark Dragons Astronomy, QR code on the About screen's credits page
 
 // Show "stale" after this long without a successful chart check.
 #define STALE_MINUTES    180

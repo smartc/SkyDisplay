@@ -403,7 +403,7 @@ void uiDrawAbout(const UiState& s, const StatusInfo& st) {
   header(s, "About");
   String repo = st.qrUrl; repo.replace("https://", "");
   if (TALL) {
-    text("SkyDisplay", 16, 40, fTitle, C_FG, top_left);
+    text(st.title.c_str(), 16, 40, fTitle, C_FG, top_left);
     for (int k = 0; k < st.nLeft; k++) {
       int y = 76 + k * 35;
       text(st.left[k].label.c_str(), 16, y, fSmall, C_MUTED, top_left, W - 32);
@@ -413,10 +413,11 @@ void uiDrawAbout(const UiState& s, const StatusInfo& st) {
     const int qw = 92, qx = W - 18 - qw, qy = 374;
     spr.fillRoundRect(qx - 5, qy - 5, qw + 10, qw + 10, 8, TFT_WHITE);
     spr.qrcode(st.qrUrl.c_str(), qx, qy, qw, 3);
-    text("Code, instructions and updates", 16, 384, fBody, C_FG, top_left, qx - 40);
+    text(st.qrTitle.c_str(), 16, 384, fBody, C_FG, top_left, qx - 40);
     text(repo.c_str(), 16, 410, fBody, C_ACCENT_ABOUT, top_left, qx - 40);
+    text(st.hint.c_str(), 16, 442, fSmall, C_IDLE, top_left, qx - 40);
   } else {
-    text("SkyDisplay", 16, 34, fTitle, C_FG, top_left);
+    text(st.title.c_str(), 16, 34, fTitle, C_FG, top_left);
     for (int k = 0; k < st.nLeft; k++) {
       int y = 68 + k * 34;
       text(st.left[k].label.c_str(), 16, y, fSmall, C_MUTED, top_left, 330);
@@ -425,7 +426,8 @@ void uiDrawAbout(const UiState& s, const StatusInfo& st) {
     const int qw = 96, qx = W - 12 - qw, qy = 50;
     spr.fillRoundRect(qx - 6, qy - 6, qw + 12, qw + 12, 8, TFT_WHITE);
     spr.qrcode(st.qrUrl.c_str(), qx, qy, qw, 3);
-    text("GitHub", qx + qw / 2, qy + qw + 12, fSmall, C_MUTED, top_center);
+    text(st.qrCaption.c_str(), qx + qw / 2, qy + qw + 12, fSmall, C_MUTED, top_center, 112);
+    text(st.hint.c_str(), qx + qw / 2, qy + qw + 40, fSmall, C_IDLE, top_center, 112);
     text(repo.c_str(), W - 12, H - 22, fSmall, C_ACCENT_ABOUT, top_right, W - 24);
   }
   spr.pushSprite(0, 0);
@@ -597,14 +599,16 @@ void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const S
   const char* trend = isnan(wx.pressure3h) ? "" : fabsf(wx.pressure3h) < 0.5f ? ", steady" : wx.pressure3h > 0 ? ", rising" : ", falling";
   snprintf(c, sizeof c, "hPa%s", trend);
   wxReading(352, 94, "PRESSURE", b, c, false, false);
-  text("CLOUD TONIGHT (WU)", 232, 161, fSmall, C_MUTED, baseline_left, 180);
+  text("CLOUD TONIGHT (WU)", 232, 159, fSmall, C_MUTED, baseline_left, 180);
   if (wx.cloudTonight >= 0) {
     uint32_t cc = wx.cloudTonight <= 30 ? C_GO : wx.cloudTonight <= 60 ? C_MAYBE : C_NO;
-    spr.fillSmoothRoundRect(232, 168, 224, 10, 5, c565(0x1A2234));
-    spr.fillSmoothRoundRect(232, 168, max(10, 224 * wx.cloudTonight / 100), 10, 5, c565(cc));
+    spr.fillSmoothRoundRect(232, 165, 224, 7, 3, c565(0x1A2234));
+    spr.fillSmoothRoundRect(232, 165, max(7, 224 * wx.cloudTonight / 100), 7, 3, c565(cc));
     snprintf(b, sizeof b, "%d%%", wx.cloudTonight);
-    text(b, 456, 161, fBody, C_FG, baseline_right);
-  } else text(MINUS, 456, 161, fBody, C_MUTED, baseline_right);
+    text(b, 456, 159, fBody, C_FG, baseline_right);
+  } else text(MINUS, 456, 159, fBody, C_MUTED, baseline_right);
+  // Weather Underground's PWS data terms: credit it clearly wherever its data is shown.
+  text(weatherUsesEcowitt() ? "Forecast: Weather Underground" : "Data: Weather Underground", 456, 185, fSmall, C_IDLE, baseline_right, 224);
 
   // ---- text forecast: always on the square screen; on the small one in place of the day strip, after a tap ----
   if (TALL || s.wxText) {

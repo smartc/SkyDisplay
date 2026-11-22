@@ -22,6 +22,7 @@ struct UiState {
   int poIndex = 0;          // notifications screen: which message is shown in full
   int dotAlert = -1;        // header dot drawn amber (the notifications screen, while messages are unread)
   int wifi = 0;             // Wi-Fi signal (RSSI, dBm) for the header icon; 0 = not connected
+  int aboutPage = 0;        // About screen: 0 about, 1 forecast credits, 2 open source
   int sound = -1;           // notifications screen sound button: -1 not shown (no sound on this board), 0 off, 1-3 volume
   bool soundLevels = false; // the button cycles volumes (Off, High, Med, Low); otherwise just On / Off
   bool soundMissing = false;  // the board has sound but its hardware didn't answer
@@ -45,6 +46,8 @@ struct StatusInfo {
   int nLeft = 0, nRight = 0;
   String qrUrl;   // settings page link, shown as a QR code
   bool refreshing = false;  // "Refresh now" was tapped and the check hasn't finished yet
+  String title = "SkyDisplay", hint;  // About screen: page title and the "tap for ..." line
+  String qrTitle = "Code, instructions and updates", qrCaption = "GitHub";  // ... and what its QR code opens
 };
 
 void uiBegin(uint8_t brightness);

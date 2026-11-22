@@ -52,6 +52,8 @@ static uint32_t poSeenArrivals = 0;  // notification downloads the loop has reac
 static uint32_t poSeenChanges = 0;   // message changes already drawn
 static uint32_t poConfirmAllMs = 0;  // "Clear all" asks for a second tap within 3 s
 static bool soundDrawn = false;      // alarm state the screen was last drawn with
+static uint32_t aboutTurnMs = 0;     // About screen: when its page last changed (pages turn every ABOUT_PAGE_MS)
+static const uint32_t ABOUT_PAGE_MS = 10000;
 static volatile uint32_t nextCheckMs = 0;  // shared with the network task
 static uint32_t nextDrawMs = 0, nextSkyMs = 0, lastTouchMs = 0;
 static bool manualDim = false;
@@ -121,10 +123,36 @@ static void buildStatus(StatusInfo& st) {
   st.refreshing = refreshPending && millis() - refreshTapMs < 60000;  // gives up on the label after a minute (no Wi-Fi)
 }
 
-// About screen: what this display is and runs (settings and live status are on the Status screen); the QR code
-// opens the repository.
-static void buildAbout(StatusInfo& st) {
+// About screen, three pages (tap to cycle): what this display is and runs, credits for the dark sky forecast (as on
+// the Clear Sky Chart's own credits page), and the open-source code inside. Settings and live status are on the
+// Status screen. The QR code opens the repository.
+static void buildAbout(StatusInfo& st, int page) {
   auto L = [&](const String& l, const String& v, bool warn = false) { if (st.nLeft < 8) { st.left[st.nLeft++] = {l, v, warn}; } };
+  st.qrUrl = REPO_URL;
+  if (page == 1) {
+    st.title = "Forecast credits";
+    st.qrUrl = DDA_URL; st.qrTitle = "Clear Sky Charts and more"; st.qrCaption = "Dark Dragons";
+    L("CLEAR SKY CHART", "Created by Attilla Danko");
+    L("MAINTAINED BY", "Dark Dragons Astronomy");
+    L("CLOUD MODELS", "CMC (RDPS), ECMWF, NOAA (HRRR)");
+    L("CMC", "Canadian Meteorological Centre");
+    L("SEEING AND TRANSPARENCY", "Allan Rahill, CMC");
+    L("SKY DARKNESS", "Ben Sugerman, after B. Schaefer");
+    st.hint = "2 / 3  \xC2\xB7  tap for open source";
+    return;
+  }
+  if (page == 2) {
+    st.title = "Open source";
+    L("LOVYANGFX", "MIT, BSD-2-Clause  \xC2\xB7  lovyan03");
+    L("ARDUINOJSON", "MIT  \xC2\xB7  Benoit Blanchon");
+    L("WIFIMANAGER", "MIT  \xC2\xB7  tzapu");
+    L("ELEGANTOTA", "AGPL-3.0  \xC2\xB7  Ayush Sharma");
+    L("WEBSOCKETS", "LGPL-2.1  \xC2\xB7  Markus Sattler");
+    L("ANIMATEDGIF", "Apache-2.0  \xC2\xB7  Larry Bank");
+    L("BARLOW FONT", "SIL OFL 1.1  \xC2\xB7  Barlow Project Authors");
+    st.hint = "3 / 3  \xC2\xB7  tap for about";
+    return;
+  }
   L("DEVICE", cfg.hostname + "  \xC2\xB7  " BOARD_NAME);
   L("FIRMWARE", "SkyDisplay " FIRMWARE_VERSION);
 #if BOARD_HAS_SOUND
@@ -134,7 +162,7 @@ static void buildAbout(StatusInfo& st) {
   L("WEATHER", "Weather Underground, EcoWitt");
   L("NOTIFICATIONS", "Pushover (unofficial client)");
   L("LICENCE", "MIT  \xC2\xB7  (c) 2026 Corey Smart");
-  st.qrUrl = REPO_URL;
+  st.hint = "1 / 3  \xC2\xB7  tap for credits";
 }
 
 // Swipe order; the observatory screen only when it's turned on.
@@ -158,6 +186,7 @@ static void stepScreen(int d) {
   ui.screen = ord[(pos + d + n) % n];
   ui.wxText = false;  // the weather screen always opens on the day strip
   ui.poIndex = 0;     // and notifications on the newest message
+  ui.aboutPage = 0;   // and About on its first page
 }
 
 static void drawScreen() {
@@ -177,7 +206,7 @@ static void drawScreen() {
   ui.needsSetup = !chartTarget().ok;  // fresh device: show the first-run QR code instead of the forecast
   ui.settingsUrl = "http://" + WiFi.localIP().toString() + "/";
   if (ui.screen == SCREEN_STATUS) { StatusInfo st; buildStatus(st); uiDrawStatus(ui, st); }
-  else if (ui.screen == SCREEN_ABOUT) { StatusInfo st; buildAbout(st); uiDrawAbout(ui, st); }
+  else if (ui.screen == SCREEN_ABOUT) { StatusInfo st; buildAbout(st, ui.aboutPage); uiDrawAbout(ui, st); }
   else if (ui.screen == SCREEN_WEATHER) uiDrawWeather(ui, wx, weatherConfigured(), "http://" + WiFi.localIP().toString() + "/");
   else if (ui.screen == SCREEN_OBS) uiDrawObservatory(ui, obs, "http://" + WiFi.localIP().toString() + "/");
   else if (ui.screen == SCREEN_PO) uiDrawNotifications(ui, poInbox, cfg.poSecret.length() && cfg.poDevice.length(), cfg.poDeviceName, ui.settingsUrl);
@@ -556,6 +585,9 @@ void loop() {
       nextDrawMs = 0; skipAdvance = true;
     }
   }
+  // About screen: the pages turn by themselves, so it's clear there's more than one.
+  if (ui.screen != SCREEN_ABOUT) aboutTurnMs = millis();
+  else if (millis() - aboutTurnMs >= ABOUT_PAGE_MS) { ui.aboutPage = (ui.aboutPage + 1) % 3; aboutTurnMs = millis(); nextDrawMs = 0; skipAdvance = true; }
   if (poConfirmAllMs && millis() - poConfirmAllMs >= 3000) { poConfirmAllMs = 0; if (ui.screen == SCREEN_PO) { nextDrawMs = 0; skipAdvance = true; } }
 
   if (Serial.available()) {
@@ -676,6 +708,9 @@ void loop() {
           case PO_TAP_NEWER: if (!silenced && idx > 0) ui.poIndex = idx - 1; break;
           case PO_TAP_OLDER: if (!silenced && idx < poInbox.n - 1) ui.poIndex = idx + 1; break;
         }
+      } else if (ui.screen == SCREEN_ABOUT) {
+        ui.aboutPage = (ui.aboutPage + 1) % 3;  // about, forecast credits, open source
+        aboutTurnMs = millis();
       } else if (ui.screen == SCREEN_STATUS) {
         int tx, ty; uiTapPoint(tx, ty);
         if (uiStatusRefreshHit(tx, ty)) {  // same as "Check chart and weather now" on the settings page
@@ -699,7 +734,7 @@ void loop() {
   // Other screens go back to the start-up screen after cfg.returnMinutes untouched (0 = never).
   if (cfg.returnMinutes && ui.screen != homeScreen() && millis() - lastTouchMs > (uint32_t)cfg.returnMinutes * 60000UL
       && !(ui.screen == SCREEN_PO && poEmergencyWaiting())) {
-    ui.screen = homeScreen(); ui.wxText = false; ui.poIndex = 0; nextDrawMs = 0;
+    ui.screen = homeScreen(); ui.wxText = false; ui.poIndex = 0; ui.aboutPage = 0; nextDrawMs = 0;
   }
   if (!screenOn(ui.screen)) ui.screen = SCREEN_FORECAST;  // turned off on the settings page
   if (webUpdating()) { delay(10); return; }  // keep the update message on screen

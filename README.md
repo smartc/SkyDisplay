@@ -29,7 +29,7 @@ It answers one question at a glance: is tonight, or tomorrow night, worth settin
 - **Status:** Wi-Fi, IP address, chart, clock sync and weather status, a QR code for the settings page, and a
   **Refresh now** button (same as "Check chart and weather now" on the settings page).
 - **About:** device name and board, firmware version (and the Indicator's buzzer firmware), data sources, licence,
-  and a QR code for this repository.
+  and a QR code for this repository. Tap for the forecast credits, and again for the open-source code inside.
 
 A Wi-Fi icon at the top right of every screen shows the signal (amber when weak, amber with a slash when not
 connected). If the saved Wi-Fi network can't be found at start-up (e.g. the router is still starting after a power
@@ -170,3 +170,40 @@ and are not covered by it.
 - AnimatedGIF by Larry Bank: Apache License 2.0 (`firmware/SkyDisplay/src/gif/LICENSE`).
 - SenseCAP Indicator pin assignments and display timings follow Seeed's board support package
   (SenseCAP_Indicator_ESP32).
+
+## Credits and licences
+
+SkyDisplay is MIT-licensed (see `LICENSE`). It's a personal project, not affiliated with or endorsed by any of the
+services below.
+
+**Dark sky forecast.** Clear Sky Charts were created by Attilla Danko and are maintained by Dark Dragons Astronomy
+(https://darkdragonsastro.com). As on the Clear Sky Chart credits page: forecast data from the Canadian Meteorological
+Centre (CMC, Environment and Climate Change Canada) and ECMWF; the astronomical forecasts (seeing and transparency)
+by Allan Rahill of CMC; sky darkness from Ben Sugerman's model, based on Bradley Schaefer's sky brightness model.
+The chart's HRRR cloud row is NOAA's High-Resolution Rapid Refresh model.
+
+**Weather.** Forecast (and, without an EcoWitt gateway, current conditions) data provided by Weather Underground,
+under The Weather Company's personal weather station data terms: personal, non-commercial use, with Weather
+Underground credited wherever its data is shown (the weather screen does). Current conditions can also come from an
+EcoWitt gateway on your own network.
+
+**Notifications.** SkyDisplay is an unofficial Pushover Open Client, not released or supported by Pushover. Sign up
+and licences at https://pushover.net.
+
+**Open-source code** (also listed on the device's About screen):
+
+| Component | Licence | Author |
+|---|---|---|
+| LovyanGFX (graphics; includes Adafruit, Bodmer and Richard Moore's QR code code) | MIT, BSD-2-Clause | lovyan03 |
+| ArduinoJson | MIT | Benoit Blanchon |
+| WiFiManager | MIT | tzapu |
+| ElegantOTA (firmware update page) | AGPL-3.0 | Ayush Sharma |
+| WebSockets (arduinoWebSockets) | LGPL-2.1 | Markus Sattler |
+| AnimatedGIF (bundled in `firmware/SkyDisplay/src/gif`, modified as noted in `VENDORED.txt`) | Apache-2.0 | Larry Bank |
+| Barlow Semi Condensed font (built into the firmware) | SIL OFL 1.1 (`tools/fonts/OFL.txt`) | The Barlow Project Authors |
+| Arduino core for ESP32 / ESP-IDF | LGPL-2.1, Apache-2.0 | Espressif and contributors |
+| Arduino-Pico core (RP2040 buzzer firmware) | LGPL-2.1 | Earle F. Philhower III and contributors |
+
+Firmware binaries include ElegantOTA, so a compiled SkyDisplay binary as a whole is covered by the AGPL-3.0; its
+complete source is this repository. Anyone sharing binaries should keep this section and the libraries' licence
+notices with them.
