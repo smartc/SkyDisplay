@@ -9,7 +9,6 @@ bool soundReady() { return false; }
 String soundStatus() { return "No sound on this board"; }
 void soundAlarm() {}
 void soundChime() {}
-void soundTest() {}
 void soundStop() {}
 bool soundAlarmOn() { return false; }
 
