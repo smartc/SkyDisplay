@@ -249,7 +249,7 @@ static void handleRoot() {
   if (cfg.soundArmed) h += F(" checked");
   h += F("> Sound on <span class='hint'>(also switched on the notifications screen)</span></label><div><span class='hint'>Buzzer</span><div>");
   h += esc(soundStatus());
-  h += F("</div></div>");
+  h += F("</div><button type='submit' form='soundTest' style='margin-top:6px'>Test sound</button></div>");
 #endif
   if (!poLinked) {
     String def; for (char c : cfg.hostname) if (isalnum((uint8_t)c) || c == '-' || c == '_') def += c;
@@ -280,7 +280,7 @@ static void handleRoot() {
          "<label class='check'><input type='checkbox' name='clearPass' value='1'> Remove the password</label>"
          "</div></section><div class='row'><button class='primary' type='submit'>Save settings</button></div></form>"
          "<form id='poLink' method='post' action='/pushover/link'></form><form id='poUnlink' method='post' action='/pushover/unlink'></form>"
-         "<form id='poClear' method='post' action='/pushover/clear'></form>");
+         "<form id='poClear' method='post' action='/pushover/clear'></form><form id='soundTest' method='post' action='/sound/test'></form>");
 
   h += F("<section><h2>Wi-Fi</h2><table><tr><td>Network</td><td>");
   h += esc(WiFi.SSID());
@@ -446,6 +446,7 @@ void webBegin(const WebHooks& h) {
   });
   server.on("/pushover/unlink", HTTP_POST, [] { if (!authOk()) return; poUnlink(); redirect("/?po=unlinked"); });
   server.on("/pushover/clear", HTTP_POST, [] { if (!authOk()) return; poClear(); redirect("/?po=cleared"); });
+  server.on("/sound/test", HTTP_POST, [] { if (!authOk()) return; soundChime(); redirect("/"); });  // plays even when sound is off
   server.on("/restart", HTTP_POST, [] { if (!authOk()) return; server.send(200, "text/plain", "Restarting..."); delay(500); ESP.restart(); });
   // Firmware upload (ElegantOTA at /update, framed by /firmware). Same password as the settings page (user admin), if set.
   server.on("/firmware", HTTP_GET, handleFirmware);

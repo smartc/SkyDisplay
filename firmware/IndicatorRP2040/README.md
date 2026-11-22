@@ -16,10 +16,10 @@ boards manager URLs:
 https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
 ```
 
-Then build for **Generic RP2040**, or with arduino-cli:
+Then build for **Seeed INDICATOR RP2040** (its flash and USB settings match the board), or with arduino-cli:
 
 ```
-arduino-cli compile -b rp2040:rp2040:generic --output-dir build firmware/IndicatorRP2040
+arduino-cli compile -b rp2040:rp2040:seeed_indicator_rp2040 --output-dir build firmware/IndicatorRP2040
 ```
 
 The file to flash is `build/IndicatorRP2040.ino.uf2`.
@@ -52,7 +52,7 @@ in 0x00, as in Seeed's firmware: one type byte, then a little-endian payload.
 | 0xA2 | BEEP_OFF | | stop any sound |
 | 0xA6 | TONE | u16 Hz, u16 ms | one tone; ends by itself |
 | 0xA7 | PING | | answered with HELLO |
-| 0xC7 | HELLO | u8 version | sent at start-up and in answer to PING |
+| 0xC7 | HELLO | u8 version | every 2 s until the first PING, then in answer to PING |
 
 The ESP32-S3 times the alarm pattern and sends one tone at a time, so the buzzer can't get stuck on if the ESP32-S3
 stalls.

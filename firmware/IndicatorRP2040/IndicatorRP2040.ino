@@ -8,9 +8,10 @@
 //   0xA2 BEEP_OFF                     stop any sound
 //   0xA6 TONE     u16 Hz, u16 ms      one tone (the ESP32 times the patterns; a tone always ends by itself)
 //   0xA7 PING                         answered with HELLO
-//   0xC7 HELLO    u8 version          sent at start-up and in answer to PING
+//   0xC7 HELLO    u8 version          sent every 2 s until the first PING, then in answer to PING
 //
-// Build with the Raspberry Pi Pico Arduino core (earlephilhower), board "Generic RP2040" (rp2040:rp2040:generic).
+// Build with the Raspberry Pi Pico Arduino core (earlephilhower), board "Seeed INDICATOR RP2040"
+// (rp2040:rp2040:seeed_indicator_rp2040).
 // Flashing: see README.md in this folder.
 
 #define FW_VERSION 1
@@ -46,6 +47,7 @@ static void sendPacket(const uint8_t* data, size_t len) {
   buf[n++] = 0;
   Serial1.write(buf, n);
 }
+static bool pinged = false;  // the ESP32 has asked; until then HELLO repeats (it may start later than us)
 static void sendHello() { uint8_t p[2] = {PKT_HELLO, FW_VERSION}; sendPacket(p, 2); }
 
 static uint16_t u16(const uint8_t* p) { return p[0] | (p[1] << 8); }
@@ -64,7 +66,7 @@ static void handle(const uint8_t* p, size_t len) {
         if (ms) tone(BUZZER, hz, ms);
       }
       break;
-    case PKT_PING: sendHello(); break;
+    case PKT_PING: pinged = true; sendHello(); break;
     default: break;  // e.g. Seeed's collect-interval and power packets: nothing to do
   }
 }
@@ -81,6 +83,8 @@ void setup() {
 void loop() {
   static uint8_t raw[64], pkt[64];
   static size_t n = 0;
+  static uint32_t helloAt = 0;
+  if (!pinged && millis() - helloAt >= 2000) { helloAt = millis(); sendHello(); }
   while (Serial1.available()) {
     uint8_t c = Serial1.read();
     if (c == 0) { size_t len = cobsDecode(raw, n, pkt); handle(pkt, len); n = 0; }

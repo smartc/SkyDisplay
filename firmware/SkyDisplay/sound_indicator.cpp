@@ -5,6 +5,8 @@
 #if defined(BOARD_INDICATOR)
 #include "sound.h"
 #include "settings.h"
+#include "soc/soc.h"
+#include "soc/usb_serial_jtag_reg.h"
 
 static HardwareSerial rp(2);
 static const int PIN_TX = 19, PIN_RX = 20;
@@ -13,6 +15,7 @@ enum : uint8_t { PKT_BEEP_OFF = 0xA2, PKT_TONE = 0xA6, PKT_PING = 0xA7, PKT_HELL
 static bool ready = false, otherFirmware = false;  // other packets but no HELLO: Seeed's factory firmware
 static uint8_t fwVersion = 0;
 static uint32_t pingAt = 0; static int pings = 0;
+static uint32_t bytesIn = 0;  // anything at all from the RP2040 (diagnostics)
 
 // Alarm: two beeps every 3 s; stops after 5 minutes. Chime: two rising notes.
 static const uint16_t ALARM_HZ = 2700, BEEP_MS = 180, BEEP_GAP_MS = 320;
@@ -53,6 +56,9 @@ static void playTone(uint16_t hz, uint16_t ms) {
 }
 
 void soundBegin() {
+  // GPIO19/20 are also the ESP32-S3's own USB pins. This board's USB-C goes through the CH340 instead, so detach the
+  // built-in USB PHY from them; otherwise it keeps its pull-ups and pad drivers on the UART lines.
+  CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
   rp.begin(115200, SERIAL_8N1, PIN_RX, PIN_TX);
   pingAt = millis() + 500;
 }
@@ -63,6 +69,7 @@ void soundLoop() {
   static size_t n = 0;
   while (rp.available()) {
     uint8_t c = rp.read();
+    bytesIn++;
     if (c != 0) { if (n < sizeof raw) raw[n++] = c; else n = 0; continue; }
     size_t len = cobsDecode(raw, n, pkt); n = 0;
     if (!len) continue;
@@ -94,7 +101,7 @@ bool soundReady() { return ready; }
 String soundStatus() {
   if (ready) return "Buzzer ready (RP2040 v" + String(fwVersion) + ")";
   if (otherFirmware) return "RP2040 has Seeed's firmware";
-  return "No answer from the RP2040";
+  return bytesIn ? "RP2040 answer not understood (" + String(bytesIn) + " bytes)" : String("No answer from the RP2040");
 }
 
 void soundAlarm() {
