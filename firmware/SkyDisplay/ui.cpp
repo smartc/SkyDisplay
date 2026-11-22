@@ -1147,7 +1147,9 @@ static TouchEvent pollTouch() {
   static int16_t x0 = 0, y0 = 0, xl = 0, yl = 0;  // press start and last position
   static uint8_t upCount = 0;                      // consecutive "not touched" reads
   lgfx::touch_point_t tp;
-  bool raw = lcd.getTouch(&tp) > 0;
+  // The controller now and then reports a touch far off the screen (e.g. -1333,-2633) when nobody touches it;
+  // those read as taps and paged the screens by themselves. Only points on the screen count.
+  bool raw = lcd.getTouch(&tp) > 0 && tp.x >= 0 && tp.x < W && tp.y >= 0 && tp.y < H;
   // The controller occasionally reports a single missed read mid-press; treat 2 in a row (20 ms) as a release.
   if (raw) upCount = 0; else if (upCount < 255) upCount++;
   bool down = raw || (wasDown && upCount < 2);

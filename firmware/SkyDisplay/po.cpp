@@ -23,7 +23,10 @@ static const char* API = "https://api.pushover.net/1/";
 static const char* UA = "SkyDisplay/" FIRMWARE_VERSION " (ESP32-S3; unofficial Open Client)";
 static const char* FILE_PATH = "/notify.bin";
 static const uint32_t FILE_MAGIC = 0x314E4F50;  // "PON1"
-static const uint32_t WS_QUIET_MS = 180000;     // no frame (Pushover sends '#' keep-alives) for this long: reconnect
+static const uint32_t WS_QUIET_MS = 180000;
+// While an emergency waits for acknowledgement, download this often: Pushover sends no signal when it's acknowledged
+// on another device (e.g. the phone), but a download then returns it with acked 1, which stops the alarm here.
+static const uint32_t EMERGENCY_POLL_MS = 15000;     // no frame (Pushover sends '#' keep-alives) for this long: reconnect
 
 static WebSocketsClient ws;
 static volatile bool syncReq = false, restartReq = true, stopped = false;
@@ -180,6 +183,7 @@ static bool sync(const String& secret, const String& device) {
   JsonArrayConst arr = d["messages"];
   if (arr.size()) logf("[po] download: %u message(s)\n", (unsigned)arr.size());
   uint64_t highest = 0; int added = 0; int8_t topPri = -2;
+  bool ackedElsewhere = false;
   {
     DataGuard g;
     for (JsonVariantConst m : arr) {
@@ -190,10 +194,17 @@ static bool sync(const String& secret, const String& device) {
       if (id > highest) highest = id;
       bool dup = false;
       const char* rc = m["receipt"] | "";
+      int ackedFlag = m["acked"] | 0;
+      logf("[po]   id %llu, priority %d, acked %d, receipt %.6s\n", (unsigned long long)id, (int)(m["priority"] | 0), ackedFlag, rc);
+      // An emergency message comes again every retry period (same id) until acknowledged: keep the one we have,
+      // no new row. Once it's acknowledged anywhere (e.g. on the phone), it comes once more with acked 1 and no
+      // receipt; take that over, which also stops the alarm here.
       for (int i = 0; i < poInbox.n; i++) {
-        if (poInbox.msg[i].id == id) { dup = true; break; }  // the last delete didn't go through
-        // An emergency message repeats (same receipt) until acknowledged: keep the one we have, no new row.
-        if (*rc && !strcmp(poInbox.msg[i].receipt, rc)) { dup = true; break; }
+        bool same = poInbox.msg[i].id == id || (*rc && !strcmp(poInbox.msg[i].receipt, rc));
+        if (!same) continue;
+        dup = true;
+        if (ackedFlag == 1 && poInbox.msg[i].acked != 1) { poInbox.msg[i].acked = 1; poInbox.changes++; ackedElsewhere = true; }
+        break;
       }
       if (dup) continue;
       PoMsg x;
@@ -211,11 +222,13 @@ static bool sync(const String& secret, const String& device) {
       // arrives quietly, just counted as unread.
       time_t now = time(nullptr);
       bool fresh = x.date && now - (time_t)x.date < 15 * 60;
-      if (fresh && x.priority > topPri) topPri = x.priority;
+      // One already acknowledged elsewhere (it can arrive that way, e.g. after a restart) never wakes or sounds.
+      if (fresh && !(x.priority >= 2 && x.acked == 1) && x.priority > topPri) topPri = x.priority;
     }
     if (added) { poInbox.unread = min(poInbox.unread + added, PO_MAX); poInbox.arrivals++; poInbox.changes++; poInbox.newestPriority = topPri; }
   }
-  if (added) { logf("[po] %d new message(s)\n", added); saveInbox(); }
+  if (ackedElsewhere) logf("[po] acknowledged elsewhere\n");
+  if (added || ackedElsewhere) { if (added) logf("[po] %d new message(s)\n", added); saveInbox(); }
   if (highest) {
     char hs[24]; snprintf(hs, sizeof hs, "%llu", (unsigned long long)highest);
     code = request("POST", "devices/" + urlEnc(device) + "/update_highest_message.json", "secret=" + urlEnc(secret) + "&message=" + hs, body);
@@ -256,6 +269,7 @@ static void onWs(WStype_t type, uint8_t* data, size_t len) {
       break;
     case WStype_TEXT: case WStype_BIN:
       lastFrameMs = millis();
+      if (len && !(len == 1 && data[0] == '#')) logf("[po] frame '%.*s'\n", (int)min(len, (size_t)16), (const char*)data);  // diagnostics
       for (size_t i = 0; i < len; i++) {
         char c = (char)data[i];
         if (c == '!') syncReq = true;
@@ -271,7 +285,7 @@ static void onWs(WStype_t type, uint8_t* data, size_t len) {
 static void poTask(void*) {
   bool wsOn = false;
   bool loaded = false;
-  uint32_t nextSyncRetry = 0;
+  uint32_t nextSyncRetry = 0, nextEmergencyPoll = 0;
   for (;;) {
     bool enabled, listen; String secret, device;
     { DataGuard g; enabled = cfg.poEnabled; listen = cfg.poListen; secret = cfg.poSecret; device = cfg.poDevice; }
@@ -308,6 +322,11 @@ static void poTask(void*) {
     if (wsOn && poInbox.state == PO_CONNECTED && millis() - lastFrameMs > WS_QUIET_MS) {
       logf("[po] no keep-alive for 3 min, reconnecting\n");
       ws.disconnect(); lastFrameMs = millis();
+    }
+    if ((int32_t)(millis() - nextEmergencyPoll) >= 0) {
+      nextEmergencyPoll = millis() + EMERGENCY_POLL_MS;
+      DataGuard g;
+      for (int i = 0; i < poInbox.n; i++) if (poInbox.msg[i].priority >= 2 && poInbox.msg[i].acked == 0) { syncReq = true; break; }
     }
     if (syncReq && (int32_t)(millis() - nextSyncRetry) >= 0) {
       syncReq = false;

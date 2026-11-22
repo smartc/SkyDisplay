@@ -508,7 +508,13 @@ void loop() {
   { DataGuard g; webLoop(); }
   soundLoop();
   if (soundAlarmOn() != soundDrawn) { nextDrawMs = 0; skipAdvance = true; }  // redraw the sound switch (once)
-  if (poInbox.changes != poSeenChanges) { poSeenChanges = poInbox.changes; if (ui.screen == SCREEN_PO) { nextDrawMs = 0; skipAdvance = true; } }
+  if (poInbox.changes != poSeenChanges) {
+    DataGuard g;
+    poSeenChanges = poInbox.changes;
+    if (ui.screen == SCREEN_PO) { nextDrawMs = 0; skipAdvance = true; }
+    // No unacknowledged emergency left (acknowledged here or elsewhere, or cleared): the alarm has nothing to say.
+    if (soundAlarmOn() && !poEmergencyWaiting()) { soundStop(); Serial.println("[main] alarm stopped: nothing left to acknowledge"); }
+  }
   if (poConfirmAllMs && millis() - poConfirmAllMs >= 3000) { poConfirmAllMs = 0; if (ui.screen == SCREEN_PO) { nextDrawMs = 0; skipAdvance = true; } }
 
   if (Serial.available()) {

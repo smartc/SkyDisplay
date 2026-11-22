@@ -71,6 +71,9 @@ licence covers it.
   21 days). They arrive quietly when it's back on: only messages under 15 minutes old can wake the screen or sound
   the alarm.
 - An emergency message that Pushover repeats until acknowledged is shown once, not once per repeat.
+- Acknowledging an emergency on another device (your phone) stops the display's alarm within about 15 seconds: while
+  an emergency waits, the display checks Pushover every 15 seconds (Pushover sends no signal for acknowledgements
+  made elsewhere).
 - Messages are deleted from Pushover once the display has them; it keeps the latest 20 in its own flash.
 - Sound needs SkyDisplay's RP2040 firmware on the Indicator: see `firmware/IndicatorRP2040/README.md`.
 
