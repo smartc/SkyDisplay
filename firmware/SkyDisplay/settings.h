@@ -78,6 +78,13 @@ void dataLock();
 void dataUnlock();
 struct DataGuard { DataGuard() { dataLock(); } ~DataGuard() { dataUnlock(); } };
 
+// HTTPS requests take turns: each TLS handshake needs ~40 KB of internal RAM, and with the Pushover connection
+// always open, two at once (chart + weather + Pushover downloads) could run out ("page: HTTP -1"). Waits at most
+// 30 s, then goes ahead anyway. Take it before the data lock, never while holding it.
+void httpsLock();
+void httpsUnlock();
+struct HttpsGuard { HttpsGuard() { httpsLock(); } ~HttpsGuard() { httpsUnlock(); } };
+
 // Serial log for the network task: takes the lock, so a line can't land in the middle of a screenshot transfer.
 void logf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 

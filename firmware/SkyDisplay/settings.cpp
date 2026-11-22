@@ -11,6 +11,14 @@ static SemaphoreHandle_t lockHandle() {
 void dataLock() { xSemaphoreTakeRecursive(lockHandle(), portMAX_DELAY); }
 void dataUnlock() { xSemaphoreGiveRecursive(lockHandle()); }
 
+static SemaphoreHandle_t httpsHandle() {
+  static SemaphoreHandle_t m = xSemaphoreCreateMutex();
+  return m;
+}
+static thread_local bool httpsHeld = false;
+void httpsLock() { httpsHeld = xSemaphoreTake(httpsHandle(), pdMS_TO_TICKS(30000)) == pdTRUE; }
+void httpsUnlock() { if (httpsHeld) { httpsHeld = false; xSemaphoreGive(httpsHandle()); } }
+
 void logf(const char* fmt, ...) {
   char buf[256];
   va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof buf, fmt, ap); va_end(ap);

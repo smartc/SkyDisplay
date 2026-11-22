@@ -546,9 +546,10 @@ void loop() {
     else if (c == 'q') { uiWifiSetupScreen(SETUP_AP_NAME, "http://192.168.4.1/"); nextDrawMs = millis() + 15000; }
     else if (c == 'Q') { UiState p = ui; p.nowUtc = nowUtc(); p.settingsUrl = "http://" + WiFi.localIP().toString() + "/"; uiFirstRunScreen(p); nextDrawMs = millis() + 15000; }
     else if (c == 'i') {
-      Serial.printf("[info] fw %s now %ld start %ld cols %d problem '%s' backlight %d ip %s heap %u (min %u) psram free %u, slowest draw %u ms, slowest loop pass %u ms\n",
+      Serial.printf("[info] fw %s now %ld start %ld cols %d problem '%s' backlight %d ip %s heap %u (min %u, largest block %u) psram free %u, slowest draw %u ms, slowest loop pass %u ms\n",
                     FIRMWARE_VERSION, (long)nowUtc(), (long)fc.startUtc, fc.n, ui.problem.c_str(), currentBacklight,
                     WiFi.localIP().toString().c_str(), (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                     (unsigned)ESP.getFreePsram(), (unsigned)perfMaxDraw, (unsigned)perfMaxLoop);
       perfMaxLoop = 0; perfMaxDraw = 0;
     }

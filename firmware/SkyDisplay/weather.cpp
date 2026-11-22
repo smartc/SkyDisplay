@@ -155,6 +155,7 @@ struct PsramSink : Stream {
 // GET url (whole body, chunked transfer handled by HTTPClient) and parse JSON through filter.
 // The URL contains the API key, so it is never logged.
 static bool getJson(const String& url, JsonDocument& filter, JsonDocument& doc, String& err, const char* what) {
+  HttpsGuard tls;
   if (WiFi.status() != WL_CONNECTED) { err = "no Wi-Fi"; return false; }
   WiFiClientSecure client; client.setInsecure(); client.setTimeout(20000);  // milliseconds (Stream::setTimeout)
   HTTPClient http;

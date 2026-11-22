@@ -98,6 +98,7 @@ String netEtag() { return etag; }
 void netSetEtag(const String& e) { etag = e; }
 
 FetchResult fetchChart(Forecast& f, const ChartTarget& ct, String& err) {
+  HttpsGuard tls;  // the image and the page, one connection at a time with the other tasks
   if (forgetEtag) { etag = ""; forgetEtag = false; }
   if (WiFi.status() != WL_CONNECTED) { err = "no Wi-Fi"; return FETCH_FAILED; }
   if (!ct.ok) { err = "chart URL not understood"; return FETCH_FAILED; }
@@ -121,6 +122,11 @@ FetchResult fetchChart(Forecast& f, const ChartTarget& ct, String& err) {
   String e = decodeChartGif(gifBuf, len, nf);
   if (e.length()) { err = "decode: " + e; return FETCH_FAILED; }
   nf.startUtc = fetchPageInfo(ct, nf.siteLat, nf.siteLon, err);
+  if (!nf.startUtc && err.startsWith("page: HTTP -")) {  // couldn't connect (often memory for TLS): one more try
+    logf("[net] %s, retrying in 3 s\n", err.c_str());
+    delay(3000); err = "";
+    nf.startUtc = fetchPageInfo(ct, nf.siteLat, nf.siteLon, err);
+  }
   if (!nf.startUtc) return FETCH_FAILED;
   f = nf;
   etag = newTag;

@@ -145,8 +145,12 @@ static String urlEnc(const String& s) {
 }
 
 // One request; returns the HTTP code (or a negative HTTPClient error) and the body. Secrets are never logged.
-static int request(const char* method, const String& path, const String& form, String& body) {
+// take = false for the settings page's link request: the web handler holds the data lock, and the HTTPS lock must
+// never be taken while holding it.
+static int request(const char* method, const String& path, const String& form, String& body, bool take = true) {
   if (WiFi.status() != WL_CONNECTED) return -1;
+  if (take) httpsLock();
+  struct Release { bool on; ~Release() { if (on) httpsUnlock(); } } release{take};
   WiFiClientSecure client; client.setInsecure(); client.setTimeout(15000);
   HTTPClient http;
   http.setUserAgent(UA);
@@ -372,13 +376,13 @@ void poClear() {
 String poLink(const String& email, const String& password, const String& twofa, const String& deviceName) {
   String body, form = "email=" + urlEnc(email) + "&password=" + urlEnc(password);
   if (twofa.length()) form += "&twofa=" + urlEnc(twofa);
-  int code = request("POST", "users/login.json", form, body);
+  int code = request("POST", "users/login.json", form, body, false);
   if (code == 412) return "2fa";
   JsonDocument d;
   if (code != 200 || deserializeJson(d, body) || (d["status"] | 0) != 1) return "Login failed: " + apiError(body, code);
   String secret = d["secret"] | "";
   if (!secret.length()) return "Login failed: no session secret";
-  code = request("POST", "devices.json", "secret=" + urlEnc(secret) + "&name=" + urlEnc(deviceName) + "&os=O", body);
+  code = request("POST", "devices.json", "secret=" + urlEnc(secret) + "&name=" + urlEnc(deviceName) + "&os=O", body, false);
   d.clear();
   if (code != 200 || deserializeJson(d, body) || (d["status"] | 0) != 1) return "Device registration failed: " + apiError(body, code);
   String id = d["id"] | "";
