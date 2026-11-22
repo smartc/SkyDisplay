@@ -446,7 +446,7 @@ void webBegin(const WebHooks& h) {
   });
   server.on("/pushover/unlink", HTTP_POST, [] { if (!authOk()) return; poUnlink(); redirect("/?po=unlinked"); });
   server.on("/pushover/clear", HTTP_POST, [] { if (!authOk()) return; poClear(); redirect("/?po=cleared"); });
-  server.on("/sound/test", HTTP_POST, [] { if (!authOk()) return; soundChime(); redirect("/"); });  // plays even when sound is off
+  server.on("/sound/test", HTTP_POST, [] { if (!authOk()) return; soundTest(); redirect("/"); });  // plays even when sound is off
   server.on("/restart", HTTP_POST, [] { if (!authOk()) return; server.send(200, "text/plain", "Restarting..."); delay(500); ESP.restart(); });
   // Firmware upload (ElegantOTA at /update, framed by /firmware). Same password as the settings page (user admin), if set.
   server.on("/firmware", HTTP_GET, handleFirmware);

@@ -24,6 +24,7 @@ static bool alarmOn = false;
 static uint32_t alarmStartMs = 0, nextStepMs = 0;
 static int alarmStep = 0;
 static int chimeStep = -1; static uint32_t chimeAtMs = 0;
+static int testStep = -1; static uint32_t testAtMs = 0;
 
 static size_t cobsEncode(const uint8_t* in, size_t len, uint8_t* out) {
   size_t o = 1, code = 0; uint8_t n = 1;
@@ -91,6 +92,10 @@ void soundLoop() {
       alarmStep ^= 1;
     }
   }
+  if (testStep >= 0 && (int32_t)(millis() - testAtMs) >= 0) {
+    if (testStep == 0) { playTone(1760, 400); testAtMs = millis() + 1400; testStep = 1; }
+    else { playTone(2350, 400); testStep = -1; }
+  }
   if (chimeStep >= 0 && (int32_t)(millis() - chimeAtMs) >= 0) {
     if (chimeStep == 0) { playTone(1760, 140); chimeAtMs = millis() + 190; chimeStep = 1; }
     else { playTone(2350, 260); chimeStep = -1; }
@@ -109,8 +114,9 @@ void soundAlarm() {
   alarmOn = true; alarmStartMs = nextStepMs = millis(); alarmStep = 0; chimeStep = -1;
 }
 void soundChime() { if (!alarmOn) { chimeStep = 0; chimeAtMs = millis(); } }
+void soundTest() { if (!alarmOn) { chimeStep = -1; testStep = 0; testAtMs = millis(); } }
 void soundStop() {
-  alarmOn = false; chimeStep = -1;
+  alarmOn = false; chimeStep = -1; testStep = -1;
   uint8_t p = PKT_BEEP_OFF; sendPacket(&p, 1);
 }
 bool soundAlarmOn() { return alarmOn; }

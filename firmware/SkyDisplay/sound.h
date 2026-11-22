@@ -10,5 +10,6 @@ String soundStatus();      // short text for the status screen and settings page
 
 void   soundAlarm();       // beep-beep every 3 s until soundStop(), or for 5 minutes at most
 void   soundChime();       // one short two-note chime
+void   soundTest();        // settings page test: the chime's two notes, longer and a second apart
 void   soundStop();
 bool   soundAlarmOn();     // the alarm is sounding
