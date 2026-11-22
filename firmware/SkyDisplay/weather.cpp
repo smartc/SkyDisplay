@@ -163,6 +163,8 @@ static bool getJson(const String& url, JsonDocument& filter, JsonDocument& doc, 
   http.setTimeout(20000);
   const char* keys[] = {"Content-Encoding", "Transfer-Encoding", "Content-Length"};
   http.collectHeaders(keys, 3);
+  // HTTP/1.0: no chunked transfer, so the body can be read straight off the connection below.
+  http.useHTTP10(true);
   if (!http.begin(client, url)) { err = String(what) + ": begin failed"; return false; }
   http.addHeader("Accept-Encoding", "identity");
   int code = http.GET();
@@ -172,7 +174,26 @@ static bool getJson(const String& url, JsonDocument& filter, JsonDocument& doc, 
   if (code != 200) { err = String(what) + ": HTTP " + String(code); http.end(); return false; }
   String enc = http.header("Content-Encoding"), te = http.header("Transfer-Encoding"), cl = http.header("Content-Length");
   PsramSink body;
-  int wrote = http.writeToStream(&body);
+  // Read the body with our own loop rather than HTTPClient::writeToStream: when the server stalls mid-response,
+  // that one spins in a read loop without ever sleeping, starving core 0's idle task until the task watchdog
+  // restarts the board (a slow Weather Underground forecast caused a restart loop). Here an empty read sleeps,
+  // and 20 s without data ends the download.
+  int expected = http.getSize();  // -1 when the server doesn't say; then read until it closes
+  WiFiClient* in = http.getStreamPtr();
+  uint8_t chunk[1024];
+  uint32_t lastData = millis();
+  int wrote = 0;
+  while (in && (expected < 0 || (int)body.len < expected)) {
+    int avail = in->available();
+    if (avail > 0) {
+      int r = in->read(chunk, min(avail, (int)sizeof chunk));
+      if (r > 0) { body.write(chunk, r); wrote += r; lastData = millis(); continue; }
+    }
+    if (!in->connected()) break;
+    if (millis() - lastData > 20000) { wrote = -1; break; }  // stalled
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+  if (expected > 0 && (int)body.len < expected) wrote = -1;  // cut short
   http.end();
   if (wrote < 0 || !body.len) {
     err = String(what) + ": download failed (" + String(wrote) + ")";

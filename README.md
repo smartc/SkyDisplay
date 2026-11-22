@@ -31,6 +31,10 @@ It answers one question at a glance: is tonight, or tomorrow night, worth settin
 - **About:** device name and board, firmware version (and the Indicator's buzzer firmware), data sources, licence,
   and a QR code for this repository.
 
+A Wi-Fi icon at the top right of every screen shows the signal (amber when weak, amber with a slash when not
+connected). If the saved Wi-Fi network can't be found at start-up (e.g. the router is still starting after a power
+cut), the display opens its setup network for 3 minutes, then tries the saved network again.
+
 Swipe between screens, tap to rotate the footer, long-press to dim. When the screen is dimmed, the first tap wakes it.
 The start-up screen is a setting; the display goes back to it after 2 minutes untouched (also a setting; 0 = never). On the Indicator the whole
 footer fits on screen at once, so it doesn't rotate.

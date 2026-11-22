@@ -126,11 +126,11 @@ static void buildStatus(StatusInfo& st) {
 static void buildAbout(StatusInfo& st) {
   auto L = [&](const String& l, const String& v, bool warn = false) { if (st.nLeft < 8) { st.left[st.nLeft++] = {l, v, warn}; } };
   L("DEVICE", cfg.hostname + "  \xC2\xB7  " BOARD_NAME);
-  L("FIRMWARE", "SkyDisplay " FIRMWARE_VERSION ", built " __DATE__);
+  L("FIRMWARE", "SkyDisplay " FIRMWARE_VERSION);
 #if BOARD_HAS_SOUND
   L("BUZZER", soundReady() ? soundFirmware() : soundStatus(), !soundReady());
 #endif
-  L("FORECAST", "Clear Sky Chart (Dark Dragons)");
+  L("DARK SKY FORECAST", "Clear Sky Chart (Dark Dragons Astronomy)");
   L("WEATHER", "Weather Underground, EcoWitt");
   L("NOTIFICATIONS", "Pushover (unofficial client)");
   L("LICENCE", "MIT  \xC2\xB7  (c) 2026 Corey Smart");
@@ -163,6 +163,7 @@ static void stepScreen(int d) {
 static void drawScreen() {
   ui.nowUtc = nowUtc();
   if (ui.screen == SCREEN_PO) poInbox.unread = 0;  // seen
+  ui.wifi = WiFi.status() == WL_CONNECTED ? min(-1, (int)WiFi.RSSI()) : 0;
   ui.sound = BOARD_HAS_SOUND ? (cfg.soundArmed ? (soundHasVolume() ? cfg.alarmVolume : 3) : 0) : -1;
   ui.soundLevels = soundHasVolume();
   ui.soundMissing = BOARD_HAS_SOUND && !soundReady();
@@ -483,9 +484,14 @@ void setup() {
   }, ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED);
   wm.setAPCallback(onPortal);
   wm.setConnectTimeout(20);
+  // With a network saved, don't wait on the setup network forever (after a power cut the router is often slower to
+  // start than the display): after 3 minutes restart and try the saved network again. A phone connected to the setup
+  // network keeps it open. A display with no network saved waits for setup as before.
+  if (wm.getWiFiIsSaved()) wm.setConfigPortalTimeout(180);
+  wm.setAPClientCheck(true);
   wm.setHostname(cfg.hostname.c_str());
   if (!wm.autoConnect(SETUP_AP_NAME)) {
-    uiMessage("Wi-Fi not set up", "Restarting...");
+    uiMessage("Wi-Fi not found", "Trying the saved network again...");
     delay(3000);
     ESP.restart();
   }
@@ -508,7 +514,11 @@ void setup() {
   soundBegin();
   lastTouchMs = millis();
   // Network work (chart + weather) on core 0, so drawing and touch on core 1 never wait for it.
-  xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, nullptr, 0);
+  // Priority 0, the same as core 0's idle task: while a download stalls, the HTTP library waits in a read loop that
+  // only yields to tasks of equal or higher priority. At priority 1 that starved the idle task, and the task watchdog
+  // restarted the board after 5 s (a slow Weather Underground answer caused a restart loop). Wi-Fi and lwIP run at
+  // their own higher priorities, so downloads aren't slowed.
+  xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, tskIDLE_PRIORITY, nullptr, 0);
 }
 
 // Log anything that holds up the loop (touch is read in its own task, but the screen only
@@ -528,6 +538,8 @@ void loop() {
   { DataGuard g; webLoop(); }
   soundLoop();
   if (soundAlarmOn() != soundDrawn) { nextDrawMs = 0; skipAdvance = true; }  // redraw the sound switch (once)
+  { static bool wasUp = true; bool up = WiFi.status() == WL_CONNECTED;     // Wi-Fi lost or back: redraw the icon now
+    if (up != wasUp) { wasUp = up; nextDrawMs = 0; skipAdvance = true; Serial.printf("[main] Wi-Fi %s\n", up ? "back" : "lost"); } }
   if (poInbox.changes != poSeenChanges) {
     DataGuard g;
     poSeenChanges = poInbox.changes;

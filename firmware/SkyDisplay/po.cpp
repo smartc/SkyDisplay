@@ -345,7 +345,7 @@ static void poTask(void*) {
 
 // ---------- public ----------
 void poBegin() {
-  xTaskCreatePinnedToCore(poTask, "po", 12288, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(poTask, "po", 12288, nullptr, tskIDLE_PRIORITY, nullptr, 0);  // see netTask in SkyDisplay.ino
 }
 void poSyncNow() { syncReq = true; }
 void poRestart() { restartReq = true; }

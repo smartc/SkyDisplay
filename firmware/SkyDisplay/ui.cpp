@@ -142,8 +142,27 @@ void uiBegin(uint8_t brightness) {
 void uiSetBacklight(uint8_t level) { lcd.setBrightness(level); }
 
 static void header(const UiState& s, const char* rightText = nullptr, bool rightWarn = false);
+// Wi-Fi icon, top right on every screen: green arcs for a good or fair signal (3 or 2), one amber arc when weak,
+// all three grey with a line through them when not connected.
+static void wifiIcon(int rssi) {
+  const int cx = W - 20, cy = 24;
+  int bars = !rssi ? 0 : rssi >= -60 ? 3 : rssi >= -70 ? 2 : 1;
+  uint32_t on = !rssi ? C_MUTED : bars == 1 ? C_MAYBE : C_GO;
+  int lit = !rssi ? 3 : bars;
+  for (int k = 0; k < 3; k++) {
+    int r0 = 5 + k * 5;
+    spr.fillArc(cx, cy, r0, r0 + 2, 225, 315, c565(k < lit ? on : C_LINE));
+  }
+  spr.fillSmoothCircle(cx, cy, 2, c565(on));
+  if (!rssi) {
+    spr.drawWideLine(cx - 11, cy - 17, cx + 7, cy + 3, 2, c565(C_BG));    // dark edge so the line reads over the arcs
+    spr.drawWideLine(cx - 11, cy - 17, cx + 7, cy + 3, 1, c565(C_MUTED));
+  }
+}
+
 static void header(const UiState& s, const char* rightText, bool rightWarn) {
   char buf[48];
+  wifiIcon(s.wifi);
   if (s.nowUtc) {
     struct tm tmv; localTm(s.nowUtc, tmv);
     snprintf(buf, sizeof buf, "%s %d %s   %02d:%02d", DOW[tmv.tm_wday], tmv.tm_mday, MON[tmv.tm_mon], tmv.tm_hour, tmv.tm_min);
@@ -159,7 +178,7 @@ static void header(const UiState& s, const char* rightText, bool rightWarn) {
     else { struct tm tmv; localTm(s.lastCheckOk, tmv);
            snprintf(buf, sizeof buf, "Chart checked %02d:%02d", tmv.tm_hour, tmv.tm_min); }
   } else snprintf(buf, sizeof buf, "Clear Sky Chart %s", chartTarget().key.c_str());
-  text(buf, W - 12, 7, fBody, col, top_right, 200);
+  text(buf, W - 38, 7, fBody, col, top_right, 186);  // left of the Wi-Fi icon
 
   // Screen dots, between the date and the status text.
   for (int k = 0; k < s.dotCount; k++) {

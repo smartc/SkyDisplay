@@ -1,7 +1,7 @@
 #pragma once
 // Fixed constants. Anything a user might change lives in settings.h and the web page.
 
-#define FIRMWARE_VERSION "0.7.0"
+#define FIRMWARE_VERSION "0.8.1"   // the only place the version is set; bump it with every release
 #define REPO_URL "https://github.com/smartc/SkyDisplay"   // shown (and as a QR code) on the About screen
 
 // Show "stale" after this long without a successful chart check.
