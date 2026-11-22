@@ -19,16 +19,17 @@ It answers one question at a glance: is tonight, or tomorrow night, worth settin
   brightness and sky temperature, mount park sensors, and each imaging rig's state from NINA (imaging, waiting,
   finished, lost, inactive). With more than two rigs the list pages, like the footer. See
   `mockup/observatory-screen.html`.
-- **Notifications** (optional): messages sent to your Pushover account, e.g. from NINA. The newest in full, the
-  next ones as a list; tap for the next message. A new message can wake the screen and switch to it (a setting), and
-  an emergency message stays up with an Acknowledge button. On the Indicator an emergency message can also sound the
-  buzzer (beep-beep every 3 seconds until you tap the screen, 5 minutes at most); a switch on the screen turns the
-  sound off for the night. See "Notifications" below.
+- **Notifications** (optional): messages sent to your Pushover account, e.g. from NINA. One message in full, the
+  others as a list; tap the top half for a newer message, the bottom half for an older one. A new message can wake
+  the screen and switch to it (a setting), and an emergency message stays up with an Acknowledge button. On the
+  Indicator an emergency message can also sound the buzzer (beep-beep every 3 seconds until you tap the screen,
+  5 minutes at most). Buttons along the bottom: Sound on/off, Monitoring on/off, Clear (this message) and Clear all.
+  See "Notifications" below.
 - **Status:** Wi-Fi, IP address, chart, clock sync and weather status, a QR code for the settings page, and a
   **Refresh now** button (same as "Check chart and weather now" on the settings page).
 
 Swipe between screens, tap to rotate the footer, long-press to dim. When the screen is dimmed, the first tap wakes it.
-The start-up screen is a setting; the display goes back to it after 2 minutes untouched. On the Indicator the whole
+The start-up screen is a setting; the display goes back to it after 2 minutes untouched (also a setting; 0 = never). On the Indicator the whole
 footer fits on screen at once, so it doesn't rotate.
 
 ## Data sources
@@ -65,9 +66,11 @@ licence covers it.
 
 - Send to it by its device name (the settings page suggests the display's hostname). A sender that names no device
   reaches every device on the account, displays included.
-- Turning the screen off on the settings page also disconnects the display from Pushover. Messages for it wait on
-  Pushover's servers (up to 21 days) and arrive quietly when it's turned back on: only messages under 15 minutes old
-  can wake the screen or sound the alarm.
+- **Monitoring** (a switch on the screen and the settings page) connects the display to Pushover. When it's off,
+  for example while you're away, the display is silent and messages for it wait on Pushover's servers (up to
+  21 days). They arrive quietly when it's back on: only messages under 15 minutes old can wake the screen or sound
+  the alarm.
+- An emergency message that Pushover repeats until acknowledged is shown once, not once per repeat.
 - Messages are deleted from Pushover once the display has them; it keeps the latest 20 in its own flash.
 - Sound needs SkyDisplay's RP2040 firmware on the Indicator: see `firmware/IndicatorRP2040/README.md`.
 

@@ -138,7 +138,10 @@ static void handleRoot() {
   h += String(cfg.footerSeconds);
   h += F("'></label><label>Start-up screen<select name='startScr'>");
   h += opt(0, cfg.startScreen, "Clear Dark Sky") + opt(1, cfg.startScreen, "Weather") + opt(3, cfg.startScreen, "Observatory") + opt(4, cfg.startScreen, "Notifications") + opt(2, cfg.startScreen, "Status");
-  h += F("</select><span class='hint'>Also where the display goes back to after 2 minutes untouched.</span></label></div></section>");
+  h += F("</select></label><label>Return to it after (minutes)<input type='number' min='0' max='120' name='returnMin' value='");
+  h += String(cfg.returnMinutes);
+  h += F("'><span class='hint'>Other screens go back to the start-up screen after this long untouched. 0 = stay put."
+         " An unacknowledged emergency notification always stays on screen.</span></label></div></section>");
 
   h += F("<section><h2>Scoring</h2><div class='grid'><label>Good hour: cloud up to (%)<input type='number' min='0' max='60' name='goodCloud' value='");
   h += String(cfg.goodMaxCloud);
@@ -233,7 +236,11 @@ static void handleRoot() {
   bool poLinked = cfg.poSecret.length() && cfg.poDevice.length();
   h += F("<section><h2>Notifications</h2><div class='grid'><label class='check' style='grid-column:1/-1'><input type='checkbox' name='poEn' value='1'");
   if (cfg.poEnabled) h += F(" checked");
-  h += F("> Show the notifications screen</label><label>When a message arrives<select name='poWake'>");
+  h += F("> Show the notifications screen</label><label class='check' style='grid-column:1/-1'><input type='checkbox' name='poListen' value='1'");
+  if (cfg.poListen) h += F(" checked");
+  h += F("> Monitoring on <span class='hint'>(off: disconnected from Pushover and silent; messages wait there and arrive"
+         " quietly when it's back on. Also switched on the notifications screen.)</span></label>"
+         "<label>When a message arrives<select name='poWake'>");
   h += opt(0, cfg.poWake, "Count it, don't wake the screen") + opt(1, cfg.poWake, "High priority: wake and show it") + opt(2, cfg.poWake, "Always wake and show it");
   h += F("</select><span class='hint'>Emergency messages stay until you tap to acknowledge them.</span></label><div><span class='hint'>Status</span><div>");
   {
@@ -366,9 +373,12 @@ static void handleSave() {
   cfg.nightTo = argInt("nightTo", 0, 23, cfg.nightTo);
   cfg.footerSeconds = argInt("footSec", 2, 30, cfg.footerSeconds);
   cfg.startScreen = argInt("startScr", 0, 4, cfg.startScreen);
+  cfg.returnMinutes = argInt("returnMin", 0, 120, cfg.returnMinutes);
   bool poWas = cfg.poEnabled;
   cfg.poEnabled = server.hasArg("poEn");
   cfg.poWake = argInt("poWake", 0, 2, cfg.poWake);
+  bool listenWas = cfg.poListen;
+  cfg.poListen = server.hasArg("poListen");
 #if BOARD_HAS_SOUND
   cfg.alarmLevel = argInt("alLevel", 0, 2, cfg.alarmLevel);
   cfg.soundArmed = server.hasArg("armed");
@@ -398,7 +408,8 @@ static void handleSave() {
   else if (server.arg("webPass").length()) cfg.webPassword = server.arg("webPass");
   settingsSave();
   if (cfg.obsEnabled) obsBegin();
-  if (cfg.poEnabled != poWas) poRestart();
+  if (cfg.poEnabled != poWas || cfg.poListen != listenWas) poRestart();
+  if (!cfg.poListen) soundStop();
   bool chartChanged = cfg.chartUrl != oldUrl;
   bool timeChanged = cfg.tz != oldTz || cfg.ntp1 != oldN1 || cfg.ntp2 != oldN2 || cfg.ntpHours != oldNtpHours
                   || cfg.lat != oldLat || cfg.lon != oldLon;

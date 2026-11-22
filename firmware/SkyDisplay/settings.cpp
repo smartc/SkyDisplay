@@ -37,6 +37,7 @@ void settingsLoad() {
   cfg.nightFrom     = prefs.getInt("nightFrom", d.nightFrom);
   cfg.nightTo       = prefs.getInt("nightTo", d.nightTo);
   cfg.footerSeconds = prefs.getInt("footSec", d.footerSeconds);
+  cfg.returnMinutes = constrain(prefs.getInt("returnMin", d.returnMinutes), 0, 120);
   cfg.startScreen = constrain(prefs.getInt("startScr", d.startScreen), 0, 4);
   cfg.goodMaxCloud  = prefs.getInt("goodCloud", d.goodMaxCloud);
   cfg.goodMinTrans  = prefs.getInt("goodTrans", d.goodMinTrans);
@@ -56,6 +57,7 @@ void settingsLoad() {
     cfg.rigPark[i] = prefs.getString(("rP" + String(i)).c_str(), "");
   }
   cfg.poEnabled     = prefs.getBool("poEn", d.poEnabled);
+  cfg.poListen      = prefs.getBool("poListen", d.poListen);
   cfg.poWake        = constrain(prefs.getInt("poWake", d.poWake), 0, 2);
   cfg.poSecret      = prefs.getString("poSec", "");
   cfg.poDevice      = prefs.getString("poDev", "");
@@ -85,6 +87,7 @@ void settingsSave() {
   prefs.putInt("nightFrom", cfg.nightFrom);
   prefs.putInt("nightTo", cfg.nightTo);
   prefs.putInt("footSec", cfg.footerSeconds);
+  prefs.putInt("returnMin", cfg.returnMinutes);
   prefs.putInt("startScr", cfg.startScreen);
   prefs.putInt("goodCloud", cfg.goodMaxCloud);
   prefs.putInt("goodTrans", cfg.goodMinTrans);
@@ -104,6 +107,7 @@ void settingsSave() {
     prefs.putString(("rP" + String(i)).c_str(), cfg.rigPark[i]);
   }
   prefs.putBool("poEn", cfg.poEnabled);
+  prefs.putBool("poListen", cfg.poListen);
   prefs.putInt("poWake", cfg.poWake);
   prefs.putString("poSec", cfg.poSecret);
   prefs.putString("poDev", cfg.poDevice);

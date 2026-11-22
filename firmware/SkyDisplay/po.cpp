@@ -189,8 +189,13 @@ static bool sync(const String& secret, const String& device) {
       if (!id) continue;
       if (id > highest) highest = id;
       bool dup = false;
-      for (int i = 0; i < poInbox.n; i++) if (poInbox.msg[i].id == id) { dup = true; break; }
-      if (dup) continue;  // the last delete didn't go through
+      const char* rc = m["receipt"] | "";
+      for (int i = 0; i < poInbox.n; i++) {
+        if (poInbox.msg[i].id == id) { dup = true; break; }  // the last delete didn't go through
+        // An emergency message repeats (same receipt) until acknowledged: keep the one we have, no new row.
+        if (*rc && !strcmp(poInbox.msg[i].receipt, rc)) { dup = true; break; }
+      }
+      if (dup) continue;
       PoMsg x;
       x.id = id; x.date = m["date"] | 0; x.priority = m["priority"] | 0; x.acked = m["acked"] | 0;
       cleanText(m["app"] | "", false, x.app, sizeof x.app);
@@ -208,7 +213,7 @@ static bool sync(const String& secret, const String& device) {
       bool fresh = x.date && now - (time_t)x.date < 15 * 60;
       if (fresh && x.priority > topPri) topPri = x.priority;
     }
-    if (added) { poInbox.unread = min(poInbox.unread + added, PO_MAX); poInbox.arrivals++; poInbox.newestPriority = topPri; }
+    if (added) { poInbox.unread = min(poInbox.unread + added, PO_MAX); poInbox.arrivals++; poInbox.changes++; poInbox.newestPriority = topPri; }
   }
   if (added) { logf("[po] %d new message(s)\n", added); saveInbox(); }
   if (highest) {
@@ -226,10 +231,11 @@ static void acknowledge(const String& secret, uint64_t id) {
   String body;
   int code = request("POST", "receipts/" + urlEnc(receipt) + "/acknowledge.json", "secret=" + urlEnc(secret), body);
   logf("[po] acknowledge: %s\n", code == 200 ? "done" : apiError(body, code).c_str());
-  if (code == 200 || (code >= 400 && code < 500)) {  // a 4xx usually means it was acknowledged elsewhere or expired
-    { DataGuard g; for (int i = 0; i < poInbox.n; i++) if (poInbox.msg[i].id == id) poInbox.msg[i].acked = 1; }
-    saveInbox();
-  }
+  // A 4xx usually means it was acknowledged elsewhere or has expired: done either way. Otherwise (no answer)
+  // the button comes back so it can be tapped again.
+  bool done = code == 200 || (code >= 400 && code < 500);
+  { DataGuard g; for (int i = 0; i < poInbox.n; i++) if (poInbox.msg[i].id == id) poInbox.msg[i].acked = done ? 1 : 0; poInbox.changes++; }
+  if (done) saveInbox();
 }
 
 // ---------- WebSocket ----------
@@ -267,8 +273,8 @@ static void poTask(void*) {
   bool loaded = false;
   uint32_t nextSyncRetry = 0;
   for (;;) {
-    bool enabled; String secret, device;
-    { DataGuard g; enabled = cfg.poEnabled; secret = cfg.poSecret; device = cfg.poDevice; }
+    bool enabled, listen; String secret, device;
+    { DataGuard g; enabled = cfg.poEnabled; listen = cfg.poListen; secret = cfg.poSecret; device = cfg.poDevice; }
     bool linked = secret.length() && device.length();
     if (restartReq) {
       restartReq = false; stopped = false;
@@ -281,6 +287,12 @@ static void poTask(void*) {
       continue;
     }
     if (!loaded) { loadInbox(); loaded = true; }
+    if (!listen) {  // monitoring off: disconnected, messages wait on Pushover's servers
+      if (wsOn) { ws.disconnect(); wsOn = false; }
+      setState(PO_PAUSED, "");
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
     if (stopped) { if (wsOn) { ws.disconnect(); wsOn = false; } vTaskDelay(pdMS_TO_TICKS(1000)); continue; }
     if (WiFi.status() != WL_CONNECTED || time(nullptr) < 1700000000) { vTaskDelay(pdMS_TO_TICKS(1000)); continue; }
 
@@ -316,10 +328,25 @@ void poSyncNow() { syncReq = true; }
 void poRestart() { restartReq = true; }
 void poAcknowledge(int index) {
   DataGuard g;
-  if (index >= 0 && index < poInbox.n && poInbox.msg[index].priority >= 2 && !poInbox.msg[index].acked) ackId = poInbox.msg[index].id;
+  if (index >= 0 && index < poInbox.n && poInbox.msg[index].priority >= 2 && poInbox.msg[index].acked == 0) {
+    ackId = poInbox.msg[index].id;
+    poInbox.msg[index].acked = 2;  // shown at once as "Acknowledging..."
+    poInbox.changes++;
+  }
+}
+void poDelete(int index) {
+  {
+    DataGuard g;
+    if (index < 0 || index >= poInbox.n) return;
+    memmove(&poInbox.msg[index], &poInbox.msg[index + 1], sizeof(PoMsg) * (poInbox.n - index - 1));
+    poInbox.n--;
+    poInbox.unread = min(poInbox.unread, poInbox.n);
+    poInbox.changes++;
+  }
+  saveInbox();
 }
 void poClear() {
-  { DataGuard g; poInbox.n = 0; poInbox.unread = 0; }
+  { DataGuard g; poInbox.n = 0; poInbox.unread = 0; poInbox.changes++; }
   saveInbox();
 }
 
@@ -354,6 +381,7 @@ String poStateText() {
   switch (poInbox.state) {
     case PO_OFF: return "Off";
     case PO_NOT_LINKED: return "Not linked";
+    case PO_PAUSED: return "Monitoring off";
     case PO_CONNECTING: return "Connecting";
     case PO_CONNECTED: return "Connected";
     case PO_RETRYING: return "Reconnecting";

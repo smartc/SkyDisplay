@@ -935,43 +935,72 @@ static int wrapParas(const char* s, int x, int y, int w, SmoothFont& f, uint32_t
 }
 
 static const int PO_ROWS = TALL ? 4 : 2, PO_ROW_H = 30;
-static const int PO_CARD_Y = 34, PO_CARD_B = H - 24 - PO_ROWS * PO_ROW_H - 6;  // card top and bottom
+static const int PO_BTN_Y = H - 38, PO_BTN_H = 32;  // bottom row of buttons
+static const int PO_CARD_Y = 34, PO_CARD_B = PO_BTN_Y - 6 - PO_ROWS * PO_ROW_H - 4;  // card top and bottom
 static const Rect PO_ACK_BTN = {28, PO_CARD_B - 48, 190, 38};
+static const Rect PO_SOUND_BTN = {12, PO_BTN_Y, 116, PO_BTN_H};
+static const Rect PO_MON_BTN = {BOARD_HAS_SOUND ? 136 : 12, PO_BTN_Y, 134, PO_BTN_H};
+static const Rect PO_CLRALL_BTN = {W - 12 - 96, PO_BTN_Y, 96, PO_BTN_H};
+static const Rect PO_CLR_BTN = {W - 12 - 96 - 8 - 72, PO_BTN_Y, 72, PO_BTN_H};
 
-static const Rect PO_SOUND_BTN = {12, H - 30, 118, 26};
-bool uiPoSoundHit(int x, int y) {
-  const Rect& r = PO_SOUND_BTN; const int slack = 10;
+static bool hit(const Rect& r, int x, int y, int slack) {
   return x >= r.x - slack && x < r.x + r.w + slack && y >= r.y - slack && y < r.y + r.h + slack;
 }
-// Bottom-left switch: bell and "Sound on" / "Sound off" (or why there's no sound).
-static void poSoundSwitch(const UiState& s) {
-  if (s.sound < 0) return;
-  const Rect& r = PO_SOUND_BTN;
-  bool on = s.sound == 1 && !s.soundMissing;
-  uint32_t col = s.alarmSounding ? C_NO : on ? C_GO : C_IDLE;
-  spr.fillSmoothRoundRect(r.x, r.y, r.w, r.h, r.h / 2, c565(blend(C_BG, col, 0.18f)));
+static bool poNeedsAck(const PoMsg& m) { return m.priority >= 2 && m.acked != 1; }
+
+PoTap uiPoTap(const UiState& s, const PoInbox& in, int x, int y) {
+  if (y >= PO_BTN_Y - 8) {  // button row (generous: fingers land low)
+    if (s.sound >= 0 && hit(PO_SOUND_BTN, x, y, 6)) return PO_TAP_SOUND;
+    if (hit(PO_MON_BTN, x, y, 6)) return PO_TAP_MONITOR;
+    if (in.n && hit(PO_CLR_BTN, x, y, 4)) return PO_TAP_CLEAR;
+    if (in.n && hit(PO_CLRALL_BTN, x, y, 6)) return PO_TAP_CLEAR_ALL;
+    return PO_TAP_OLDER;
+  }
+  int idx = in.n ? constrain(s.poIndex, 0, in.n - 1) : 0;
+  if (in.n && in.msg[idx].priority >= 2 && in.msg[idx].acked == 0 && hit(PO_ACK_BTN, x, y, 12)) return PO_TAP_ACK;
+  return y < H / 2 ? PO_TAP_NEWER : PO_TAP_OLDER;
+}
+
+// Pill button: outline and text in col, tinted fill when on.
+static void poPill(const Rect& r, const char* label, uint32_t col, bool on, int iconW = 0) {
+  spr.fillSmoothRoundRect(r.x, r.y, r.w, r.h, r.h / 2, c565(on ? blend(C_BG, col, 0.18f) : C_BG));
   spr.drawRoundRect(r.x, r.y, r.w, r.h, r.h / 2, c565(col));
-  // bell
-  int bx = r.x + 15, by = r.y + r.h / 2;
-  spr.fillSmoothCircle(bx, by - 2, 6, c565(col));
-  spr.fillRect(bx - 6, by - 2, 13, 6, c565(col));
-  spr.fillRect(bx - 8, by + 3, 17, 2, c565(col));
-  spr.fillSmoothCircle(bx, by + 7, 2, c565(col));
-  if (!on) spr.drawLine(bx - 9, by + 8, bx + 9, by - 9, c565(C_BG)), spr.drawLine(bx - 8, by + 9, bx + 9, by - 8, c565(col));
-  const char* t = s.alarmSounding ? "Tap: silence" : s.soundMissing && s.sound == 1 ? "No buzzer" : on ? "Sound on" : "Sound off";
-  text(t, r.x + 30, by, fSmall, col, middle_left, r.w - 36);
+  text(label, r.x + (iconW ? iconW + 14 : r.w / 2), r.y + r.h / 2, fSmall, col, iconW ? middle_left : middle_center, r.w - 12 - iconW);
 }
 
-bool uiPoAckHit(int x, int y) {
-  const Rect& r = PO_ACK_BTN; const int slack = 12;
-  return x >= r.x - slack && x < r.x + r.w + slack && y >= r.y - slack && y < r.y + r.h + slack;
+static void poButtons(const UiState& s, const PoInbox& in) {
+  if (s.sound >= 0) {  // bell: sound on/off
+    const Rect& r = PO_SOUND_BTN;
+    bool on = s.sound == 1 && !s.soundMissing && s.poListen;
+    uint32_t col = s.alarmSounding ? C_NO : on ? C_GO : C_IDLE;
+    const char* t = s.alarmSounding ? "Tap: silence" : s.soundMissing && s.sound == 1 ? "No buzzer" : s.sound == 1 ? "Sound on" : "Sound off";
+    poPill(r, t, col, on || s.alarmSounding, 18);
+    int bx = r.x + 16, by = r.y + r.h / 2;
+    spr.fillSmoothCircle(bx, by - 2, 6, c565(col));
+    spr.fillRect(bx - 6, by - 2, 13, 6, c565(col));
+    spr.fillRect(bx - 8, by + 3, 17, 2, c565(col));
+    spr.fillSmoothCircle(bx, by + 7, 2, c565(col));
+    if (s.sound != 1) { spr.drawLine(bx - 9, by + 9, bx + 9, by - 9, c565(C_BG)); spr.drawLine(bx - 9, by + 8, bx + 8, by - 9, c565(col)); }
+  }
+  {  // monitoring on/off: a dot, filled when connected
+    const Rect& r = PO_MON_BTN;
+    uint32_t col = !s.poListen ? C_IDLE : in.state == PO_CONNECTED ? C_GO : C_MAYBE;
+    poPill(r, s.poListen ? "Monitoring" : "Monitor off", col, s.poListen, 14);
+    int cx = r.x + 16, cy = r.y + r.h / 2;
+    if (s.poListen) spr.fillSmoothCircle(cx, cy, 5, c565(col));
+    else spr.drawCircle(cx, cy, 5, c565(col));
+  }
+  if (in.n) {
+    poPill(PO_CLR_BTN, "Clear", C_MUTED, false);
+    poPill(PO_CLRALL_BTN, s.poConfirmAll ? "Tap again" : "Clear all", s.poConfirmAll ? C_NO : C_MUTED, s.poConfirmAll);
+  }
 }
 
 void uiDrawNotifications(const UiState& s, const PoInbox& in, bool linked, const String& deviceName, const String& settingsUrl) {
   spr.fillScreen(c565(C_BG));
-  bool trouble = in.state == PO_STOPPED || in.state == PO_RETRYING || in.state == PO_CONNECTING;
   char hb[48];
   if (in.state == PO_STOPPED) snprintf(hb, sizeof hb, "Notifications stopped");
+  else if (in.state == PO_PAUSED) snprintf(hb, sizeof hb, "Monitoring off");
   else if (in.state == PO_RETRYING) snprintf(hb, sizeof hb, "Reconnecting...");
   else if (in.state == PO_CONNECTING) snprintf(hb, sizeof hb, "Connecting...");
   else snprintf(hb, sizeof hb, "Notifications");
@@ -985,11 +1014,16 @@ void uiDrawNotifications(const UiState& s, const PoInbox& in, bool linked, const
     return;
   }
   if (!in.n) {
-    text("No notifications yet", W / 2, OY + 110, fTitle, C_FG, top_center);
-    String l1 = "Send to device \"" + deviceName + "\" from Pushover.";
-    text(l1.c_str(), W / 2, OY + 156, fBody, C_MUTED, top_center, W - 40);
-    if (in.state == PO_STOPPED && in.error.length()) wrapParas(in.error.c_str(), 40, OY + 190, W - 80, fBody, C_MAYBE, 24, 3);
-    poSoundSwitch(s);
+    if (!s.poListen) {
+      text("Monitoring is off", W / 2, OY + 100, fTitle, C_FG, top_center);
+      text("Messages wait on Pushover until it's back on.", W / 2, OY + 146, fBody, C_MUTED, top_center, W - 40);
+    } else {
+      text("No notifications", W / 2, OY + 100, fTitle, C_FG, top_center);
+      String l1 = "Send to device \"" + deviceName + "\" from Pushover.";
+      text(l1.c_str(), W / 2, OY + 146, fBody, C_MUTED, top_center, W - 40);
+      if (in.state == PO_STOPPED && in.error.length()) wrapParas(in.error.c_str(), 40, OY + 180, W - 80, fBody, C_MAYBE, 24, 3);
+    }
+    poButtons(s, in);
     spr.pushSprite(0, 0);
     return;
   }
@@ -997,7 +1031,7 @@ void uiDrawNotifications(const UiState& s, const PoInbox& in, bool linked, const
   int idx = constrain(s.poIndex, 0, in.n - 1);
   const PoMsg& m = in.msg[idx];
   uint32_t pc = poColor(m.priority);
-  bool needAck = m.priority >= 2 && !m.acked;
+  bool needAck = poNeedsAck(m), sending = m.acked == 2;
   // ---- the message in full ----
   const int x = 12, y = PO_CARD_Y, w = W - 24, hgt = PO_CARD_B - PO_CARD_Y;
   spr.fillSmoothRoundRect(x, y, w, hgt, 10, c565(needAck ? blend(C_TILE, C_NO, 0.12f) : C_TILE));
@@ -1018,31 +1052,39 @@ void uiDrawNotifications(const UiState& s, const PoInbox& in, bool linked, const
   wrapParas(m.text, x + 22, ty + 2, w - 40, fBody, C_FG, 24, lines);
   if (needAck) {
     const Rect& r = PO_ACK_BTN;
-    spr.fillSmoothRoundRect(r.x, r.y, r.w, r.h, 8, c565(C_NO));
-    text("Acknowledge", r.x + r.w / 2, r.y + r.h / 2, fBodyB, C_BG, middle_center, r.w - 12);
-    text("Emergency: tap to acknowledge", r.x + r.w + 14, r.y + r.h / 2, fSmall, C_NO, middle_left, x + w - (r.x + r.w + 28));
+    spr.fillSmoothRoundRect(r.x, r.y, r.w, r.h, 8, c565(sending ? blend(C_TILE, C_NO, 0.35f) : C_NO));
+    text(sending ? "Acknowledging..." : "Acknowledge", r.x + r.w / 2, r.y + r.h / 2, fBodyB, sending ? C_FG : C_BG, middle_center, r.w - 12);
+    if (!sending) text("Emergency: tap to acknowledge", r.x + r.w + 14, r.y + r.h / 2, fSmall, C_NO, middle_left, x + w - (r.x + r.w + 28));
   } else if (m.priority >= 2) {
     text("Acknowledged", x + 22, y + hgt - 22, fSmall, C_MUTED, top_left);
   }
-  char pos[16]; snprintf(pos, sizeof pos, "%d / %d", idx + 1, in.n);
-  text(pos, x + w - 14, y + hgt - 22, fSmall, C_IDLE, top_right);
+  char pos[40];
+  if (in.n > 1) snprintf(pos, sizeof pos, "%d / %d  \xC2\xB7  top: newer, bottom: older", idx + 1, in.n);
+  else snprintf(pos, sizeof pos, "1 / 1");
+  text(pos, x + w - 14, y + hgt - 22, fSmall, C_IDLE, top_right, w / 2 + 40);
 
-  // ---- the next ones, one line each ----
-  for (int r = 0; r < PO_ROWS && idx + 1 + r < in.n; r++) {
-    const PoMsg& o = in.msg[idx + 1 + r];
-    int ry = PO_CARD_B + 6 + r * PO_ROW_H;
-    if (r) spr.drawFastHLine(24, ry - 1, W - 48, c565(C_LINE));
+  // ---- the others, one line each: newer ones first, then a divider where this message sits, then older ----
+  int newer = min(idx, PO_ROWS / 2), older = min(in.n - 1 - idx, PO_ROWS - newer);
+  newer = min(idx, PO_ROWS - older);  // fill the rows from whichever side has more
+  int first = idx - newer;
+  int row = 0;
+  for (int i = first; i < in.n && row < PO_ROWS; i++) {
+    if (i == idx) continue;
+    if (i > idx && row >= newer + older) break;
+    const PoMsg& o = in.msg[i];
+    int ry = PO_CARD_B + 4 + row * PO_ROW_H;
+    if (i > idx && row == newer && newer > 0) spr.fillRect(24, ry - 1, W - 48, 2, c565(C_ACCENT));  // this message's place
+    else if (row) spr.drawFastHLine(24, ry - 1, W - 48, c565(C_LINE));
     spr.fillSmoothCircle(26, ry + PO_ROW_H / 2, 4, c565(poColor(o.priority)));
     char ow[24]; poWhen(ow, sizeof ow, o.date, s.nowUtc);
     text(ow, 40, ry + PO_ROW_H / 2, fSmall, C_MUTED, middle_left, 86);
     const char* ot = o.title[0] ? o.title : o.app;
     int tw = textFit(ot, 130, ry + PO_ROW_H / 2, fBody, fSmall, C_FG, middle_left, 150);
-    String first = o.text; int nl = first.indexOf('\n'); if (nl >= 0) first = first.substring(0, nl);
-    text(first.c_str(), 130 + tw + 12, ry + PO_ROW_H / 2, fSmall, C_MUTED, middle_left, W - 24 - (130 + tw + 12));
+    String firstLine = o.text; int nl = firstLine.indexOf('\n'); if (nl >= 0) firstLine = firstLine.substring(0, nl);
+    text(firstLine.c_str(), 130 + tw + 12, ry + PO_ROW_H / 2, fSmall, C_MUTED, middle_left, W - 24 - (130 + tw + 12));
+    row++;
   }
-  text(in.n > 1 ? "Tap for the next message" : "", W / 2, H - 20, fSmall, C_IDLE, top_center);
-  if (trouble && in.state == PO_STOPPED && in.error.length()) text(in.error.c_str(), W / 2, H - 20, fSmall, C_MAYBE, top_center, W - 24);
-  poSoundSwitch(s);
+  poButtons(s, in);
   spr.pushSprite(0, 0);
 }
 

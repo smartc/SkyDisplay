@@ -6,7 +6,8 @@
 //
 // Screens (swipe left/right): forecast, weather (Weather Underground), observatory and notifications (Pushover;
 // each when turned on), status.
-// Touch: tap = next footer page (status screen: "Refresh now" button; notifications: next message), long press = dim.
+// Touch: tap = next footer page (status screen: "Refresh now" button; notifications: top half newer, bottom half
+// older, plus the buttons along the bottom), long press = dim.
 // Serial commands (115200 on the WT32, 460800 on the Indicator): s = screenshot dump, r = check chart and weather now, d = dump decoded rows,
 //   a = sun/moon times, n = next screen, 0-4 = show a screen, i = info, W = forget Wi-Fi and restart.
 
@@ -48,12 +49,14 @@ static const uint32_t WX_SAVE_MS = 30UL * 60000;  // current conditions alone ar
 static volatile bool refreshPending = false;      // "Refresh now" tapped on the status screen; cleared by the next chart check
 static uint32_t refreshTapMs = 0;
 static uint32_t poSeenArrivals = 0;  // notification downloads the loop has reacted to (wake, switch screen)
+static uint32_t poSeenChanges = 0;   // message changes already drawn
+static uint32_t poConfirmAllMs = 0;  // "Clear all" asks for a second tap within 3 s
+static bool soundDrawn = false;      // alarm state the screen was last drawn with
 static volatile uint32_t nextCheckMs = 0;  // shared with the network task
 static uint32_t nextDrawMs = 0, nextSkyMs = 0, lastTouchMs = 0;
 static bool manualDim = false;
 static uint32_t nightWakeUntilMs = 0;  // a tap during night hours brightens the screen until this time
 static bool skipAdvance = true;         // draw the current footer page without advancing first
-static const uint32_t SCREEN_RETURN_MS = 120000;  // other screens return to the start-up screen after this long untouched
 static time_t nowUtc();
 static volatile time_t lastNtpSync = 0;      // UTC time of the last successful NTP sync (0 = none since boot)
 static const long NTP_STALE_SECONDS = 12L * 3600;
@@ -105,6 +108,7 @@ static void buildStatus(StatusInfo& st) {
   if (cfg.poEnabled) {
     bool linked = cfg.poSecret.length() && cfg.poDevice.length();
     String v = linked ? poStateText() : String("Not linked");
+    if (linked && !cfg.poListen) v = "Monitoring off";
     bool soundTrouble = false;
 #if BOARD_HAS_SOUND
     v += cfg.soundArmed && cfg.alarmLevel ? ", sound on" : ", silent";
@@ -145,7 +149,9 @@ static void drawScreen() {
   if (ui.screen == SCREEN_PO) poInbox.unread = 0;  // seen
   ui.sound = BOARD_HAS_SOUND ? (cfg.soundArmed ? 1 : 0) : -1;
   ui.soundMissing = BOARD_HAS_SOUND && !soundReady();
-  ui.alarmSounding = soundAlarmOn();
+  ui.alarmSounding = soundDrawn = soundAlarmOn();
+  ui.poListen = cfg.poListen;
+  ui.poConfirmAll = poConfirmAllMs && millis() - poConfirmAllMs < 3000;
   { int ord[SCREEN_COUNT]; ui.dotCount = screenOrder(ord); ui.dotIndex = 0; ui.dotAlert = -1;
     for (int i = 0; i < ui.dotCount; i++) { if (ord[i] == ui.screen) ui.dotIndex = i; if (ord[i] == SCREEN_PO && poInbox.unread) ui.dotAlert = i; } }
   ui.needsSetup = !chartTarget().ok;  // fresh device: show the first-run QR code instead of the forecast
@@ -501,7 +507,9 @@ void loop() {
   loopStartMs = millis();
   { DataGuard g; webLoop(); }
   soundLoop();
-  { static bool was = false; bool on = soundAlarmOn(); if (on != was) { was = on; nextDrawMs = 0; skipAdvance = true; } }  // redraw the switch
+  if (soundAlarmOn() != soundDrawn) { nextDrawMs = 0; skipAdvance = true; }  // redraw the sound switch (once)
+  if (poInbox.changes != poSeenChanges) { poSeenChanges = poInbox.changes; if (ui.screen == SCREEN_PO) { nextDrawMs = 0; skipAdvance = true; } }
+  if (poConfirmAllMs && millis() - poConfirmAllMs >= 3000) { poConfirmAllMs = 0; if (ui.screen == SCREEN_PO) { nextDrawMs = 0; skipAdvance = true; } }
 
   if (Serial.available()) {
     int c = Serial.read();
@@ -536,7 +544,7 @@ void loop() {
     int pri = poInbox.newestPriority;
     bool show = cfg.poEnabled && (cfg.poWake == 2 || (cfg.poWake == 1 && pri >= 1) || pri >= 2);
     // Sound: only fresh messages count (newestPriority ignores a backlog); quiet hours don't apply.
-    if (cfg.poEnabled && cfg.soundArmed) {
+    if (cfg.poEnabled && cfg.poListen && cfg.soundArmed) {
       if (pri >= 2 && cfg.alarmLevel >= 1) { soundAlarm(); Serial.println("[main] alarm sounding"); }
       else if (pri == 1 && cfg.alarmLevel == 2) soundChime();
     }
@@ -585,12 +593,29 @@ void loop() {
         int tx, ty; uiTapPoint(tx, ty);
         DataGuard g;
         int idx = constrain(ui.poIndex, 0, max(0, poInbox.n - 1));
-        bool needAck = poInbox.n && poInbox.msg[idx].priority >= 2 && !poInbox.msg[idx].acked;
-        if (BOARD_HAS_SOUND && uiPoSoundHit(tx, ty)) {  // sound on/off switch
-          if (!silenced) { cfg.soundArmed = !cfg.soundArmed; settingsSave(); Serial.printf("[main] tap: sound %s\n", cfg.soundArmed ? "on" : "off"); }
+        PoTap t = uiPoTap(ui, poInbox, tx, ty);
+        static const char* TAPS[] = {"newer", "older", "sound", "monitor", "clear", "clear all", "acknowledge"};
+        Serial.printf("[main] tap at %d,%d: %s%s\n", tx, ty, TAPS[t], silenced ? " (silenced the alarm)" : "");
+        if (t != PO_TAP_CLEAR_ALL) poConfirmAllMs = 0;
+        switch (t) {
+          case PO_TAP_SOUND:
+            if (!silenced) { cfg.soundArmed = !cfg.soundArmed; settingsSave(); }
+            break;
+          case PO_TAP_MONITOR:
+            cfg.poListen = !cfg.poListen; settingsSave(); poRestart();
+            if (!cfg.poListen) soundStop();
+            break;
+          case PO_TAP_CLEAR:
+            poDelete(idx); ui.poIndex = min(idx, max(0, poInbox.n - 1));
+            break;
+          case PO_TAP_CLEAR_ALL:
+            if (poConfirmAllMs) { poConfirmAllMs = 0; poClear(); ui.poIndex = 0; }
+            else poConfirmAllMs = max(1UL, millis());
+            break;
+          case PO_TAP_ACK: poAcknowledge(idx); break;
+          case PO_TAP_NEWER: if (!silenced && idx > 0) ui.poIndex = idx - 1; break;
+          case PO_TAP_OLDER: if (!silenced && idx < poInbox.n - 1) ui.poIndex = idx + 1; break;
         }
-        else if (needAck && uiPoAckHit(tx, ty)) { poAcknowledge(idx); Serial.println("[main] tap: acknowledge"); }
-        else if (poInbox.n && !silenced) ui.poIndex = (idx + 1) % poInbox.n;  // next message (wraps)
       } else if (ui.screen == SCREEN_STATUS) {
         int tx, ty; uiTapPoint(tx, ty);
         if (uiStatusRefreshHit(tx, ty)) {  // same as "Check chart and weather now" on the settings page
@@ -611,7 +636,9 @@ void loop() {
   if (bl != currentBacklight) { uiSetBacklight(bl); currentBacklight = bl; }
 
   // Footer rotation: advance a page, then draw. A tap already drew, so it skips one advance.
-  if (ui.screen != homeScreen() && millis() - lastTouchMs > SCREEN_RETURN_MS && !(ui.screen == SCREEN_PO && poEmergencyWaiting())) {
+  // Other screens go back to the start-up screen after cfg.returnMinutes untouched (0 = never).
+  if (cfg.returnMinutes && ui.screen != homeScreen() && millis() - lastTouchMs > (uint32_t)cfg.returnMinutes * 60000UL
+      && !(ui.screen == SCREEN_PO && poEmergencyWaiting())) {
     ui.screen = homeScreen(); ui.wxText = false; ui.poIndex = 0; nextDrawMs = 0;
   }
   if (!screenOn(ui.screen)) ui.screen = SCREEN_FORECAST;  // turned off on the settings page

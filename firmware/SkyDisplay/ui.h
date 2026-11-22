@@ -24,6 +24,8 @@ struct UiState {
   int sound = -1;           // notifications screen sound switch: -1 not shown (no sound on this board), 0 off, 1 on
   bool soundMissing = false;  // the board has sound but its hardware didn't answer
   bool alarmSounding = false;
+  bool poListen = true;     // notifications monitoring on (the screen's Monitoring switch)
+  bool poConfirmAll = false;  // "Clear all" tapped once: the button asks for a second tap
 };
 
 static const int FOOTER_PAGES = 3;
@@ -52,8 +54,10 @@ void uiDrawObservatory(const UiState& s, const Observatory& o, const String& set
 // Notifications screen: the message at s.poIndex in full, the next ones as a list. linked = the display is a
 // device on a Pushover account.
 void uiDrawNotifications(const UiState& s, const PoInbox& in, bool linked, const String& deviceName, const String& settingsUrl);
-bool uiPoAckHit(int x, int y);    // that point is on the notifications screen's "Acknowledge" button
-bool uiPoSoundHit(int x, int y);  // ... or on its sound on/off switch
+// What a tap at (x, y) on the notifications screen hits. PO_TAP_NEWER / PO_TAP_OLDER: the top or bottom half
+// of the screen away from the buttons.
+enum PoTap { PO_TAP_NEWER, PO_TAP_OLDER, PO_TAP_SOUND, PO_TAP_MONITOR, PO_TAP_CLEAR, PO_TAP_CLEAR_ALL, PO_TAP_ACK };
+PoTap uiPoTap(const UiState& s, const PoInbox& in, int x, int y);
 // Wi-Fi setup: QR code to join the setup network (open, no password) and QR code for the setup page.
 void uiWifiSetupScreen(const char* apName, const String& setupUrl);
 // First run after Wi-Fi: QR code for the settings page, to add the chart and time zone.
