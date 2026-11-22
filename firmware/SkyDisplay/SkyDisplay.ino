@@ -121,21 +121,19 @@ static void buildStatus(StatusInfo& st) {
   st.refreshing = refreshPending && millis() - refreshTapMs < 60000;  // gives up on the label after a minute (no Wi-Fi)
 }
 
-// About screen: device, firmware, network and credits; the QR code opens the repository.
+// About screen: what this display is and runs (settings and live status are on the Status screen); the QR code
+// opens the repository.
 static void buildAbout(StatusInfo& st) {
   auto L = [&](const String& l, const String& v, bool warn = false) { if (st.nLeft < 8) { st.left[st.nLeft++] = {l, v, warn}; } };
   L("DEVICE", cfg.hostname + "  \xC2\xB7  " BOARD_NAME);
   L("FIRMWARE", "SkyDisplay " FIRMWARE_VERSION ", built " __DATE__);
 #if BOARD_HAS_SOUND
-  L("BUZZER", soundStatus(), !soundReady());
+  L("BUZZER", soundReady() ? soundFirmware() : soundStatus(), !soundReady());
 #endif
-  L("NETWORK", WiFi.localIP().toString() + "  \xC2\xB7  " + WiFi.macAddress());
-  uint32_t up = millis() / 60000;
-  L("UP / MEMORY", (up >= 1440 ? String(up / 1440) + "d " : "") + String(up / 60 % 24) + "h " + String(up % 60) + "m  \xC2\xB7  "
-                   + String(ESP.getFreeHeap() / 1024) + " KB free (" + String(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024) + " KB block)");
-  L("DATA", "Clear Sky Chart (Dark Dragons), Weather Underground, EcoWitt");
-  L("NOTIFICATIONS", "Unofficial Pushover Open Client, not made by Pushover");
-  L("LICENCE", "MIT  \xC2\xB7  (c) 2026 smartc");
+  L("FORECAST", "Clear Sky Chart (Dark Dragons)");
+  L("WEATHER", "Weather Underground, EcoWitt");
+  L("NOTIFICATIONS", "Pushover (unofficial client)");
+  L("LICENCE", "MIT  \xC2\xB7  (c) 2026 Corey Smart");
   st.qrUrl = REPO_URL;
 }
 

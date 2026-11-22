@@ -7,6 +7,7 @@ void   soundBegin();
 void   soundLoop();        // call often from the main loop: runs the patterns and reads the sound chip's replies
 bool   soundReady();       // the sound hardware answered (on the Indicator: SkyDisplay's RP2040 firmware is installed)
 String soundStatus();      // short text for the status screen and settings page
+String soundFirmware();    // e.g. "RP2040 firmware v2" (About screen)
 
 void   soundAlarm();       // beep-beep every 3 s until soundStop(), or for 5 minutes at most
 void   soundChime();       // one short two-note chime

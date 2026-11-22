@@ -7,6 +7,7 @@ void soundBegin() {}
 void soundLoop() {}
 bool soundReady() { return false; }
 String soundStatus() { return "No sound on this board"; }
+String soundFirmware() { return ""; }
 void soundAlarm() {}
 void soundChime() {}
 void soundStop() {}

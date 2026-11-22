@@ -101,6 +101,7 @@ void soundLoop() {
 }
 
 bool soundReady() { return ready; }
+String soundFirmware() { return "RP2040 firmware v" + String(fwVersion); }
 String soundStatus() {
   if (ready) return "Buzzer ready (RP2040 v" + String(fwVersion) + ")";
   if (otherFirmware) return "RP2040 has Seeed's firmware";
