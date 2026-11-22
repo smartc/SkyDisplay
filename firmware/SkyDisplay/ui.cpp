@@ -94,6 +94,8 @@ static void wrapText(const char* s, int x, int y, int w, SmoothFont& f, uint32_t
   }
 }
 
+static void fitWord(const char* s, int x, int y, uint32_t col, int maxW, SmoothFont& a, SmoothFont& b, SmoothFont& c);
+
 static void led(int x, int y, uint32_t col, bool on) {
   if (on) for (int r = 24; r > 11; r--) { float t = 1.0f - (r - 11) / 13.0f; spr.fillCircle(x, y, r, c565(blend(C_TILE, col, 0.55f * t * t))); }
   spr.fillSmoothCircle(x, y, 10, c565(col));
@@ -108,7 +110,8 @@ static void tile(int x, const char* label, const Verdict& v) {
   uint32_t col = wordColor(v.word);
   led(x + 24, y + 28, col, lit);
   text(label, x + 44, y + 9, fSmall, C_MUTED, top_left, w - 50);
-  text(wordText(v.word), x + 43, y + 20, fBig, lit ? col : C_MUTED, top_left, w - 48);
+  // Words too wide for the big font (MAYBE, CLEAR) drop to a smaller one on the same baseline.
+  fitWord(wordText(v.word), x + 43, y + 20 + fBig.font.maxAscent, lit ? col : C_MUTED, w - 48, fBig, fTitle, fBodyB);
   text(v.l1, x + 12, y + 62, fBodyB, C_FG, top_left, w - 20);
   text(v.l2, x + 12, y + 87, fBody, C_MUTED, top_left, w - 20);
 }
@@ -323,7 +326,21 @@ void uiDraw(const UiState& s) {
   spr.pushSprite(0, 0);
 }
 
-// Status screen: two columns of label/value rows, plus a QR code for the settings page.
+// Status screen: two columns of label/value rows, a QR code for the settings page and a "Refresh now" button.
+struct Rect { int x, y, w, h; };
+static const Rect REFRESH_BTN = TALL ? Rect{16, 428, 180, 38} : Rect{366, 188, 108, 42};
+
+bool uiStatusRefreshHit(int x, int y) {
+  const Rect& r = REFRESH_BTN; const int slack = 12;  // fingers are bigger than the outline
+  return x >= r.x - slack && x < r.x + r.w + slack && y >= r.y - slack && y < r.y + r.h + slack;
+}
+
+static void refreshButton(bool busy) {
+  const Rect& r = REFRESH_BTN;
+  spr.fillSmoothRoundRect(r.x, r.y, r.w, r.h, 8, c565(C_TILE));
+  spr.drawRoundRect(r.x, r.y, r.w, r.h, 8, c565(busy ? C_LINE : C_IDLE));
+  textFit(busy ? "Checking..." : "Refresh now", r.x + r.w / 2, r.y + r.h / 2, fBodyB, fBody, busy ? C_MUTED : C_FG, middle_center, r.w - 12);
+}
 static void statusColumn(int x, int w, const StatusItem* items, int n) {
   for (int k = 0; k < n; k++) {
     int y = TALL ? 46 + k * 42 : 44 + k * 34;
@@ -343,9 +360,10 @@ void uiDrawStatus(const UiState& s, const StatusInfo& st) {
       const int qw = 92, qx = W - 18 - qw, qy = 374;
       spr.fillRoundRect(qx - 5, qy - 5, qw + 10, qw + 10, 8, TFT_WHITE);
       spr.qrcode(st.qrUrl.c_str(), qx, qy, qw, 3);
-      text("Scan for the settings page", 16, 396, fBody, C_FG, top_left, qx - 40);
-      text(st.qrUrl.c_str(), 16, 422, fBody, C_MUTED, top_left, qx - 40);
+      text("Scan for the settings page", 16, 376, fBody, C_FG, top_left, qx - 40);
+      text(st.qrUrl.c_str(), 16, 400, fBody, C_MUTED, top_left, qx - 40);
     }
+    refreshButton(st.refreshing);
   } else {
     if (st.qrUrl.length()) {
       const int qw = 96, qx = W - 12 - qw, qy = 50;
@@ -353,6 +371,7 @@ void uiDrawStatus(const UiState& s, const StatusInfo& st) {
       spr.qrcode(st.qrUrl.c_str(), qx, qy, qw, 3);
       text("Settings", qx + qw / 2, qy + qw + 12, fSmall, C_MUTED, top_center);
     }
+    refreshButton(st.refreshing);
     text("Swipe for the other screens", W / 2, H - 22, fSmall, C_IDLE, top_center);
   }
   spr.pushSprite(0, 0);
@@ -918,6 +937,8 @@ void uiMessage(const char* title, const char* l1, const char* l2, const char* l3
 // ---------- touch: polled every 10 ms in its own task, so drawing and network calls can't
 // swallow a tap or swipe. Events are queued and picked up by the main loop. ----------
 static QueueHandle_t touchQ = nullptr;
+static volatile int16_t tapX = -1, tapY = -1;
+void uiTapPoint(int& x, int& y) { x = tapX; y = tapY; }
 
 static TouchEvent pollTouch() {
   static bool wasDown = false, longFired = false, moved = false;
@@ -938,7 +959,7 @@ static TouchEvent pollTouch() {
   if (down && !longFired && !moved && millis() - downMs >= LONG_PRESS_MS) { longFired = true; ev = TOUCH_LONG; }
   if (!down && wasDown && !longFired) {
     int dx = xl - x0, dy = yl - y0;
-    if (!moved) ev = TOUCH_TAP;
+    if (!moved) { ev = TOUCH_TAP; tapX = x0; tapY = y0; }
     else if (abs(dx) >= 60 && abs(dx) > 2 * abs(dy)) ev = dx < 0 ? TOUCH_SWIPE_LEFT : TOUCH_SWIPE_RIGHT;
   }
   wasDown = down;

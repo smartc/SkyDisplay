@@ -15,13 +15,13 @@ struct WxDay {
   bool valid = false;
 };
 
-struct Weather {
+// Everything except the text fields, kept as plain data so it can be saved to flash in one piece (cache.cpp).
+struct WxData {
   // current observation
   bool   haveCurrent = false;
   time_t obsUtc = 0;
   float  temp = NAN, feels = NAN, dew = NAN, wind = NAN, gust = NAN, pressure = NAN, rainToday = NAN;
   int    humidity = -1, windDir = -1;
-  String source;                              // where current conditions came from: "EcoWitt" or the WU station ID
   // last 24 hours, built on the device from hourly averages of the current readings (seeded from WU history
   // at start-up when a station is set), so the trace costs no API calls
   bool   haveHistory = false;
@@ -36,6 +36,10 @@ struct Weather {
   int    cloudTonight = -1;
   WxDay  today;                                // today's daytime forecast; not valid once the day part has passed
   WxDay  days[WX_DAYS];                        // tonight, then the next four days (night conditions)
+};
+
+struct Weather : WxData {
+  String source;                               // where current conditions came from: "EcoWitt" or the WU station ID
   String forecastTitle, forecastText;          // WU text forecast: "TODAY" (daytime) or "TONIGHT" once the day is over
   // status
   String error;                                // last error from current conditions, empty if fine

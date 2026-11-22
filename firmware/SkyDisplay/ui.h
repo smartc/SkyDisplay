@@ -32,6 +32,7 @@ struct StatusInfo {
   StatusItem left[8], right[8];
   int nLeft = 0, nRight = 0;
   String qrUrl;   // settings page link, shown as a QR code
+  bool refreshing = false;  // "Refresh now" was tapped and the check hasn't finished yet
 };
 
 void uiBegin(uint8_t brightness);
@@ -53,4 +54,6 @@ enum TouchEvent { TOUCH_NONE, TOUCH_TAP, TOUCH_LONG, TOUCH_SWIPE_LEFT, TOUCH_SWI
 // for LONG_PRESS_MS. A mostly horizontal drag of 60 px or more is a swipe (fires on release).
 static const uint32_t LONG_PRESS_MS = 700;
 TouchEvent uiTouchEvent();
+void uiTapPoint(int& x, int& y);           // where the last TOUCH_TAP was (screen pixels)
+bool uiStatusRefreshHit(int x, int y);     // that point is on the status screen's "Refresh now" button
 void uiScreenshot(Stream& out); // raw RGB565 dump of the last frame, for debugging

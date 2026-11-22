@@ -5,7 +5,7 @@
 // Settings page: http://skydisplay.local/ (or the IP shown in the serial log).
 //
 // Screens (swipe left/right): forecast, weather (Weather Underground), observatory (when turned on), status.
-// Touch: tap = next footer page, long press = dim.
+// Touch: tap = next footer page (status screen: "Refresh now" button), long press = dim.
 // Serial commands (115200 on the WT32, 460800 on the Indicator): s = screenshot dump, r = check chart and weather now, d = dump decoded rows,
 //   a = sun/moon times, n = next screen, i = info, W = forget Wi-Fi and restart.
 
@@ -23,6 +23,7 @@
 #include "weather.h"
 #include "tls.h"
 #include "obs.h"
+#include "cache.h"
 
 static Forecast fc;
 static UiState ui;
@@ -38,6 +39,11 @@ static const uint32_t WX_CURRENT_ECOWITT_MS = 60000UL, WX_CURRENT_WU_MS = 10UL *
 static const uint32_t WX_NEVER = 0x7FFFFFFF;  // history after it has seeded the trace
 static uint8_t wxFails[3] = {0, 0, 0};         // consecutive failures per part, for the retry backoff
 static String wxSetupKey;  // station + key the current data came from; a change resets the weather
+static time_t wxOkUtc[3] = {0, 0, 0};      // last success per part (UTC), kept with the cached weather
+static uint32_t wxSavedMs = 0;             // last weather save to flash
+static const uint32_t WX_SAVE_MS = 30UL * 60000;  // current conditions alone are saved at most this often (flash wear)
+static volatile bool refreshPending = false;      // "Refresh now" tapped on the status screen; cleared by the next chart check
+static uint32_t refreshTapMs = 0;
 static volatile uint32_t nextCheckMs = 0;  // shared with the network task
 static uint32_t nextDrawMs = 0, nextSkyMs = 0, lastTouchMs = 0;
 static bool manualDim = false;
@@ -93,6 +99,7 @@ static void buildStatus(StatusInfo& st) {
   else if (wx.wuError.length()) R("WEATHER", wx.wuError, true);
   else R("WEATHER", (weatherUsesEcowitt() ? String("EcoWitt") : cfg.wuStation) + (wx.haveCurrent ? ", " + fmtLocal(wx.obsUtc, "%H:%M") : String(", waiting")));
   st.qrUrl = "http://" + WiFi.localIP().toString() + "/";
+  st.refreshing = refreshPending && millis() - refreshTapMs < 60000;  // gives up on the label after a minute (no Wi-Fi)
 }
 
 // Swipe order; the observatory screen only when it's turned on.
@@ -167,17 +174,24 @@ static void netCheckChart() {
   String err;
   uint32_t t0 = millis();
   FetchResult r = fetchChart(work, ct, err);
-  DataGuard g;
-  if (r == FETCH_FAILED) {
-    logf("[net] chart check failed: %s\n", err.c_str());
-    ui.problem = err.substring(0, 40);
-    nextCheckMs = millis() + 5UL * 60 * 1000;  // retry sooner after a failure
-  } else {
-    ui.problem = "";
-    ui.lastCheckOk = nowUtc();
-    if (r == FETCH_UPDATED) { fc = work; chartJustUpdated = true; logf("[main] chart updated: %d columns\n", fc.n); }
-    nextCheckMs = millis() + (uint32_t)cfg.pollMinutes * 60 * 1000;
+  time_t checked = 0;
+  {
+    DataGuard g;
+    if (r == FETCH_FAILED) {
+      logf("[net] chart check failed: %s\n", err.c_str());
+      ui.problem = err.substring(0, 40);
+      nextCheckMs = millis() + 5UL * 60 * 1000;  // retry sooner after a failure
+    } else {
+      ui.problem = "";
+      ui.lastCheckOk = checked = nowUtc();
+      if (r == FETCH_UPDATED) { fc = work; chartJustUpdated = true; logf("[main] chart updated: %d columns\n", fc.n); }
+      nextCheckMs = millis() + (uint32_t)cfg.pollMinutes * 60 * 1000;
+    }
+    refreshPending = false;
   }
+  // Flash writes outside the lock, so the screen doesn't wait for them.
+  if (r == FETCH_UPDATED) cacheSaveChart(work, ct.key, netEtag(), checked);
+  else if (r == FETCH_UNCHANGED) cacheSaveChartChecked(checked);
   logf("[net] chart check %u ms\n", (unsigned)(millis() - t0));
   redrawNeeded = true;
 }
@@ -188,7 +202,7 @@ static void netPollWeather() {
   {
     DataGuard g;
     String setup = cfg.wuStation + "|" + cfg.wuKey + "|" + cfg.ecowittHost;
-    if (setup != wxSetupKey) { wx = Weather(); wxSetupKey = setup; nextWxMs[0] = nextWxMs[1] = nextWxMs[2] = millis(); wxFails[0] = wxFails[1] = wxFails[2] = 0; redrawNeeded = true; }
+    if (setup != wxSetupKey) { wx = Weather(); wxSetupKey = setup; nextWxMs[0] = nextWxMs[1] = nextWxMs[2] = millis(); wxFails[0] = wxFails[1] = wxFails[2] = 0; wxOkUtc[0] = wxOkUtc[1] = wxOkUtc[2] = 0; wxSavedMs = 0; redrawNeeded = true; }
     configured = weatherConfigured();
     s.station = cfg.wuStation; s.key = cfg.wuKey; s.ecowitt = cfg.ecowittHost;
     s.lat = cfg.lat; s.lon = cfg.lon;
@@ -206,15 +220,25 @@ static void netPollWeather() {
     String why = p == WX_CURRENT ? work.error : work.wuError;
     bool keyProblem = why.indexOf("API key") >= 0 || why.indexOf("not found") >= 0;
     uint32_t period = p == WX_CURRENT ? (eco ? WX_CURRENT_ECOWITT_MS : WX_CURRENT_WU_MS) : p == WX_HISTORY ? WX_NEVER : WX_FORECAST_MS;
-    DataGuard g;
-    if (wxSetupKey == setupKey) wx = work;  // ignore results if the settings changed meanwhile
-    // Failures back off: 2, 4, 8, 16, then every 30 min (failed calls count against the WU limit too).
-    // The history only seeds the trace, so it gives up after 3 tries until the next restart or settings change.
-    wxFails[p] = ok ? 0 : (uint8_t)min(wxFails[p] + 1, 10);
-    uint32_t retry = (eco && p == WX_CURRENT) ? WX_CURRENT_ECOWITT_MS : min(30UL * 60000, (2UL * 60000) << min((int)wxFails[p] - 1, 4));
-    if (!ok && p == WX_HISTORY && wxFails[p] >= 3) retry = WX_NEVER;
-    nextWxMs[p] = millis() + (ok || keyProblem ? period : retry);
-    redrawNeeded = true;
+    bool save = false; time_t okUtc[3];
+    {
+      DataGuard g;
+      if (wxSetupKey != setupKey) return;  // ignore results if the settings changed meanwhile
+      wx = work;
+      if (ok) wxOkUtc[p] = nowUtc();
+      // Failures back off: 2, 4, 8, 16, then every 30 min (failed calls count against the WU limit too).
+      // The history only seeds the trace, so it gives up after 3 tries until the next restart or settings change.
+      wxFails[p] = ok ? 0 : (uint8_t)min(wxFails[p] + 1, 10);
+      uint32_t retry = (eco && p == WX_CURRENT) ? WX_CURRENT_ECOWITT_MS : min(30UL * 60000, (2UL * 60000) << min((int)wxFails[p] - 1, 4));
+      if (!ok && p == WX_HISTORY && wxFails[p] >= 3) retry = WX_NEVER;
+      nextWxMs[p] = millis() + (ok || keyProblem ? period : retry);
+      redrawNeeded = true;
+      // Save after every forecast or history download; current conditions only now and then (they come every
+      // minute from EcoWitt, and after a restart only the hourly trace needs them).
+      save = ok && (p != WX_CURRENT || !wxSavedMs || millis() - wxSavedMs >= WX_SAVE_MS);
+      if (save) { wxSavedMs = millis(); memcpy(okUtc, wxOkUtc, sizeof okUtc); }
+    }
+    if (save) cacheSaveWeather(work, setupKey, okUtc);
     return;
   }
 }
@@ -246,6 +270,58 @@ static void netTask(void*) {
       if ((int32_t)(millis() - nextObsMs) >= 0) netPollObservatory();
     }
     vTaskDelay(pdMS_TO_TICKS(250));
+  }
+}
+
+// ---------- start-up: the last chart and weather from flash ----------
+// The screens fill straight away, and each part is downloaded only when it's due on its usual schedule
+// (counted from when it was last fetched, before the restart).
+static void restoreCache() {
+  cacheLogUsage();
+  time_t now = nowUtc();
+  auto dueIn = [&](time_t okUtc, uint32_t periodMs) -> uint32_t {  // ms until the next fetch (0 = now)
+    if (!now || !okUtc || okUtc > now) return 0;
+    uint64_t ageMs = (uint64_t)(now - okUtc) * 1000;
+    return ageMs >= periodMs ? 0 : periodMs - (uint32_t)ageMs;
+  };
+
+  ChartTarget ct = chartTarget();
+  String etag; time_t checked = 0;
+  if (ct.ok && cacheLoadChart(fc, ct.key, etag, checked)) {
+    if (now && now >= fc.startUtc + (time_t)fc.n * 3600) {  // every hour of it has passed
+      fc.valid = false;
+      Serial.println("[cache] saved chart is out of date, not used");
+    } else {
+      netSetEtag(etag);  // the first check is then a cheap "unchanged?" request
+      ui.lastCheckOk = checked;
+      chartJustUpdated = true;
+      uint32_t due = dueIn(checked, (uint32_t)cfg.pollMinutes * 60000UL);
+      nextCheckMs = millis() + due;
+      Serial.printf("[cache] chart from flash, next check in %u min\n", (unsigned)(due / 60000));
+    }
+  }
+
+  String setup = cfg.wuStation + "|" + cfg.wuKey + "|" + cfg.ecowittHost;
+  time_t ok[3] = {0, 0, 0};
+  if (weatherConfigured() && cacheLoadWeather(wx, setup, ok)) {
+    long age = (now && ok[WX_CURRENT] && ok[WX_CURRENT] <= now) ? (long)(now - ok[WX_CURRENT]) : -1;
+    if (now && (age < 0 || age > 24L * 3600)) {
+      wx = Weather();
+      Serial.println("[cache] saved weather is over a day old, not used");
+    } else {
+      wxSetupKey = setup;  // so the first poll keeps it instead of starting afresh
+      memcpy(wxOkUtc, ok, sizeof wxOkUtc);
+      wxSavedMs = millis();
+      if (age > 3600) wx.haveCurrent = false;  // too old to show as "now"; fetched first anyway
+      bool eco = cfg.ecowittHost.length() > 0;
+      nextWxMs[WX_CURRENT] = millis() + dueIn(ok[WX_CURRENT], eco ? WX_CURRENT_ECOWITT_MS : WX_CURRENT_WU_MS);
+      nextWxMs[WX_FORECAST] = millis() + dueIn(ok[WX_FORECAST], WX_FORECAST_MS);
+      // The saved trace replaces the WU history call unless the display was off long enough to leave a gap.
+      bool traceOk = wx.haveHistory && age >= 0 && age < 2 * 3600;
+      nextWxMs[WX_HISTORY] = traceOk ? millis() + WX_NEVER : millis();
+      Serial.printf("[cache] weather from flash (%ld min old), forecast in %u min%s\n", age / 60,
+                    (unsigned)((nextWxMs[WX_FORECAST] - millis()) / 60000), traceOk ? ", no history call" : "");
+    }
   }
 }
 
@@ -365,6 +441,7 @@ void setup() {
   applyTime();
   for (int i = 0; i < 40 && !nowUtc(); i++) delay(250);
   Serial.printf("[main] clock %s, NTP re-sync every %u h\n", nowUtc() ? "set" : "NOT set yet", (unsigned)(sntp_get_sync_interval() / 3600000UL));
+  restoreCache();
 
   webBegin({webCheckNow, webApply, webStatus, webShowScreen});
   httpsBegin(cfg.hostname);  // HTTPS location page for "Use my location" (browsers need HTTPS for GPS)
@@ -450,6 +527,13 @@ void loop() {
         ui.rigPage++;  // next two rigs (wraps when drawn)
       } else if (ui.screen == SCREEN_WEATHER) {
         ui.wxText = !ui.wxText;  // small screen: text forecast <-> day strip (the square screen shows both)
+      } else if (ui.screen == SCREEN_STATUS) {
+        int tx, ty; uiTapPoint(tx, ty);
+        if (uiStatusRefreshHit(tx, ty)) {  // same as "Check chart and weather now" on the settings page
+          refreshPending = true; refreshTapMs = millis();
+          webCheckNow();
+          Serial.println("[main] tap: refresh now");
+        } else Serial.printf("[main] tap at %d,%d\n", tx, ty);
       }
     }
     // Redraw now; the rotation timer restarts from here.

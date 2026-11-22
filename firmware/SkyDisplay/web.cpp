@@ -124,7 +124,7 @@ static void handleRoot() {
   h += F("'></label><label>Footer rotation (seconds)<input type='number' min='2' max='30' name='footSec' value='");
   h += String(cfg.footerSeconds);
   h += F("'></label><label>Start-up screen<select name='startScr'>");
-  h += opt(0, cfg.startScreen, "Forecast") + opt(1, cfg.startScreen, "Weather") + opt(3, cfg.startScreen, "Observatory") + opt(2, cfg.startScreen, "Status");
+  h += opt(0, cfg.startScreen, "Clear Dark Sky") + opt(1, cfg.startScreen, "Weather") + opt(3, cfg.startScreen, "Observatory") + opt(2, cfg.startScreen, "Status");
   h += F("</select><span class='hint'>Also where the display goes back to after 2 minutes untouched.</span></label></div></section>");
 
   h += F("<section><h2>Scoring</h2><div class='grid'><label>Good hour: cloud up to (%)<input type='number' min='0' max='60' name='goodCloud' value='");

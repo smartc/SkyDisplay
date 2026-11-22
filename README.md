@@ -19,7 +19,8 @@ It answers one question at a glance: is tonight, or tomorrow night, worth settin
   brightness and sky temperature, mount park sensors, and each imaging rig's state from NINA (imaging, waiting,
   finished, lost, inactive). With more than two rigs the list pages, like the footer. See
   `mockup/observatory-screen.html`.
-- **Status:** Wi-Fi, IP address, chart, clock sync and weather status, and a QR code for the settings page.
+- **Status:** Wi-Fi, IP address, chart, clock sync and weather status, a QR code for the settings page, and a
+  **Refresh now** button (same as "Check chart and weather now" on the settings page).
 
 Swipe between screens, tap to rotate the footer, long-press to dim. When the screen is dimmed, the first tap wakes it.
 The start-up screen is a setting; the display goes back to it after 2 minutes untouched. On the Indicator the whole
@@ -38,6 +39,8 @@ footer fits on screen at once, so it doesn't rotate.
 - **Forecast** from the **Weather Underground** API: needs your own API key, entered on the settings page. With an
   EcoWitt gateway a display uses about 24 calls a day; without one, about 170 (the free limit is 1,500 per key).
   The 24-hour temperature trace is built on the device.
+- The last chart and weather are kept in flash, so after a restart or firmware update the screens fill at once and
+  each part is downloaded only when it is due on its usual schedule.
 - **Observatory**, all optional and set on the settings page:
   - ASCOM Alpaca devices: a Dome for the roof, a SafetyMonitor for the safety verdict (Llama Watch's unsafe
     reasons are shown when present), a SafetyMonitor or a UDP safety broadcast for rain, and ObservingConditions for

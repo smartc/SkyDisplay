@@ -94,6 +94,8 @@ static time_t fetchPageInfo(const ChartTarget& ct, double& lat, double& lon, Str
 
 static volatile bool forgetEtag = false;  // set from the main loop, acted on in the network task
 void netForgetEtag() { forgetEtag = true; }
+String netEtag() { return etag; }
+void netSetEtag(const String& e) { etag = e; }
 
 FetchResult fetchChart(Forecast& f, const ChartTarget& ct, String& err) {
   if (forgetEtag) { etag = ""; forgetEtag = false; }
