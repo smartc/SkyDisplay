@@ -158,9 +158,9 @@ static void header(const UiState& s, const char* rightText, bool rightWarn) {
   text(buf, W - 12, 7, fBody, col, top_right, 200);
 
   // Screen dots, between the date and the status text.
-  for (int k = 0; k < SCREEN_COUNT; k++) {
-    int x = 236 + (k - (SCREEN_COUNT - 1) / 2.0f) * 14, y = 15;
-    if (k == s.screen) spr.fillSmoothCircle(x, y, 4, c565(C_FG));
+  for (int k = 0; k < s.dotCount; k++) {
+    int x = 236 + (k - (s.dotCount - 1) / 2.0f) * 14, y = 15;
+    if (k == s.dotIndex) spr.fillSmoothCircle(x, y, 4, c565(C_FG));
     else spr.fillSmoothCircle(x, y, 3, c565(C_IDLE));
   }
 }
@@ -460,12 +460,13 @@ static const char* COMPASS[16] = {"N","NNE","NE","ENE","E","ESE","SE","SSE","S",
 void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const String& settingsUrl) {
   spr.fillScreen(c565(C_BG));
   char right[48]; bool stale = false;
-  if (!configured) strcpy(right, "Weather Underground");
+  String src = wx.source.length() ? wx.source : (cfg.ecowittHost.length() ? String("EcoWitt") : cfg.wuStation);
+  if (!configured) strcpy(right, "Weather");
   else if (wx.haveCurrent && s.nowUtc) {
     long mins = max(0L, (long)(s.nowUtc - wx.obsUtc) / 60);
     stale = mins > 30;
-    snprintf(right, sizeof right, "%s, %ld min ago", cfg.wuStation.c_str(), mins);
-  } else snprintf(right, sizeof right, "%s", cfg.wuStation.c_str());
+    snprintf(right, sizeof right, "%s, %ld min ago", src.c_str(), mins);
+  } else snprintf(right, sizeof right, "%s", src.c_str());
   header(s, right, stale);
 
   if (!configured || !wx.haveCurrent) {
@@ -543,7 +544,8 @@ void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const S
       if (wx.today.pop >= 0) snprintf(b, sizeof b, "High %s, %d%% precip", hi, wx.today.pop); else snprintf(b, sizeof b, "High %s", hi);
       text(b, 456, ty + 20, fBody, C_FG, baseline_right, 220);
     }
-    if (!wx.haveForecast) text("Pending", 24, ty + 52, fBody, C_IDLE, baseline_left);
+    if (!wx.haveForecast && wx.wuError.length()) wrapText(("Forecast unavailable: " + wx.wuError).c_str(), 24, ty + 34, 432, fBody, C_MAYBE, 25, 4);
+    else if (!wx.haveForecast) text(weatherHasForecast() ? "Pending" : "Needs a Weather Underground API key", 24, ty + 52, fBody, C_IDLE, baseline_left, 432);
     else if (!wx.forecastText.length()) text("No text forecast", 24, ty + 52, fBody, C_IDLE, baseline_left);
     else wrapText(wx.forecastText.c_str(), 24, ty + 32, 432, fTitle, C_FG, 28, 4);
   }
@@ -559,7 +561,7 @@ void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const S
     bool tonight = &d == &wx.days[0], today = &d == &wx.today;
     uint32_t bg = tonight ? 0x111A2B : C_TILE;
     spr.fillSmoothRoundRect(x + 2, y0, cw, 114, 9, c565(bg)); spr.drawRoundRect(x + 2, y0, cw, 114, 9, c565(C_LINE));
-    if (!wx.haveForecast) { text("Pending", cx, y0 + 57, fSmall, C_IDLE, middle_center, cw - 10); continue; }
+    if (!wx.haveForecast) { if (TALL || !wx.wuError.length()) text("Pending", cx, y0 + 57, fSmall, C_IDLE, middle_center, cw - 10); continue; }
     text(d.name, cx, y0 + 20, fSmall, tonight || today ? C_FG : C_MUTED, baseline_center, cw - 8);
     wxIcon(d.icon, cx, y0 + 42, bg);
     char lo[16], hi[16]; fmtDeg(lo, sizeof lo, d.lo, 0); fmtDeg(hi, sizeof hi, d.hi, 0);
@@ -573,6 +575,267 @@ void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const S
     } else {         // six narrow cells: a small raindrop or cloud before the number
       if (d.pop >= 0) { snprintf(b, sizeof b, "%d%%", d.pop); miniStat(b, cx, y0 + 93, false, d.pop >= 50 ? C_MAYBE : C_MUTED, bg); }
       if (d.cloud >= 0) { snprintf(b, sizeof b, "%d%%", d.cloud); miniStat(b, cx, y0 + 108, true, C_MUTED, bg); }
+    }
+  }
+  if (!TALL && !wx.haveForecast && wx.wuError.length())  // no text panel on the small screen: say why across the strip
+    text(("Forecast unavailable: " + wx.wuError).c_str(), W / 2, y0 + 57, fBody, C_MAYBE, middle_center, W - 40);
+  spr.pushSprite(0, 0);
+}
+
+// ---------- observatory screen (layout follows mockup/observatory-screen.html) ----------
+static const uint32_t C_BLUE = 0x6FB6FF, C_TRACK = 0x1A2234;
+
+static void hm(char* b, size_t n, time_t t) { struct tm tmv; localTm(t, tmv); snprintf(b, n, "%02d:%02d", tmv.tm_hour, tmv.tm_min); }
+
+// Status pill: tinted fill, outline and text in col. Returns its width.
+static int pill(int x, int y, const char* label, uint32_t col, uint32_t bg = C_TILE) {
+  spr.setFont(&fSmall.font);
+  int w = spr.textWidth(label) + 14, h = 21;
+  spr.fillSmoothRoundRect(x, y, w, h, h / 2, c565(blend(bg, col, 0.16f)));
+  spr.drawRoundRect(x, y, w, h, h / 2, c565(blend(bg, col, 0.55f)));
+  text(label, x + 7, y + 16, fSmall, col, baseline_left);
+  return w;
+}
+static int pillWidth(const char* label) { spr.setFont(&fSmall.font); return spr.textWidth(label) + 14; }
+
+static void glowDot(int x, int y, int r, uint32_t col, bool glow) {
+  if (glow) for (int rr = r * 2; rr > r; rr--) { float t = 1.0f - (float)(rr - r) / r; spr.fillCircle(x, y, rr, c565(blend(C_TILE, col, 0.5f * t * t))); }
+  spr.fillSmoothCircle(x, y, r, c565(col));
+}
+
+static void barH(int x, int y, int w, int h, float frac, uint32_t col) {
+  spr.fillSmoothRoundRect(x, y, w, h, h / 2, c565(C_TRACK));
+  if (frac > 0) spr.fillSmoothRoundRect(x, y, max(h, (int)(w * min(frac, 1.0f))), h, h / 2, c565(col));
+}
+
+// Small building with a roll-off roof: closed, part way, or rolled off onto its rails.
+static void roofIcon(int x, int y, float s, int shutter, uint32_t col) {
+  auto X = [&](float v) { return x + (int)lroundf(v * s); };
+  auto Y = [&](float v) { return y + (int)lroundf(v * s); };
+  spr.fillRect(X(0), Y(14), X(36) - X(0), Y(32) - Y(14), c565(0x2A3245));
+  spr.fillRect(X(36), Y(14), X(54) - X(36), max(2, (int)(2 * s)), c565(0x3A4358));
+  float off = shutter == SHUTTER_OPEN ? 18 : (shutter == SHUTTER_OPENING || shutter == SHUTTER_CLOSING) ? 9 : 0;
+  spr.fillTriangle(X(-2 + off), Y(15), X(18 + off), Y(5), X(38 + off), Y(15), c565(col));
+  if (shutter == SHUTTER_ERROR) text("!", X(18), Y(30), fBodyB, C_NO, baseline_center);
+}
+
+// Largest of the given fonts that fits maxW (the last one is shortened if even it doesn't fit).
+static void fitWord(const char* s, int x, int y, uint32_t col, int maxW, SmoothFont& a, SmoothFont& b, SmoothFont& c) {
+  SmoothFont* fs[] = {&a, &b, &c};
+  for (SmoothFont* f : fs) { spr.setFont(&f->font); if (spr.textWidth(s) <= maxW || f == &c) { text(s, x, y, *f, col, baseline_left, maxW); return; } }
+}
+
+static void fmtLux(char* b, size_t n, float v) {
+  if (isnan(v)) snprintf(b, n, "%s", MINUS);
+  else if (v < 0.01f) snprintf(b, n, "%.4f", v);
+  else if (v < 10) snprintf(b, n, "%.2f", v);
+  else if (v < 10000) snprintf(b, n, "%.0f", v);
+  else snprintf(b, n, "%.0f %03.0f", floorf(v / 1000), fmodf(v, 1000));
+}
+
+struct RigText { const char* word; uint32_t col; bool glow; String l1, l2, l3, right; };
+static RigText rigText(const ObsRig& r, time_t now) {
+  RigText t{"", C_IDLE, false, "", "", "", ""};
+  char b[24];
+  String what = r.target;
+  if (r.filter.length()) what += (what.length() ? "  \xC2\xB7  " : "") + r.filter;
+  if (!isnan(r.exposure)) what += (what.length() ? "  \xC2\xB7  " : "") + String((int)lroundf(r.exposure)) + " s";
+  String frames = String(r.frames) + (r.frames == 1 ? " frame" : " frames") + " tonight";
+  String lastImg = r.lastImage && now ? "Last image " + String(max(0L, (long)(now - r.lastImage) / 60)) + " min ago" : String("No images yet tonight");
+  if (!isnan(r.rms) || !isnan(r.hfr)) {
+    String rms = isnan(r.rms) ? String(MINUS) : String(r.rms, 2) + "\xE2\x80\xB3";
+    String hfr = isnan(r.hfr) ? String(MINUS) : String(r.hfr, 2);
+    t.right = "RMS " + rms + "   HFR " + hfr;
+  }
+  switch (r.state) {
+    case RIG_IMAGING: t.word = "IMAGING"; t.col = C_GO; t.glow = true;
+      t.l1 = what.length() ? what : String("Sequence running"); t.l2 = frames; t.l3 = lastImg;
+      if (r.guider == "LostLock") { t.l2 = "Guiding: lost the star"; }
+      break;
+    case RIG_WAITING: t.word = "WAITING"; t.col = C_MAYBE;
+      t.l1 = what.length() ? what : String("Sequence running"); t.l2 = r.frames ? frames : String("Sequence running, not exposing"); t.l3 = lastImg; break;
+    case RIG_FINISHED: t.word = "FINISHED"; t.col = C_GO;
+      t.l1 = (r.target.length() ? r.target + "  \xC2\xB7  " : String("")) + String(r.frames) + " frames";
+      if (r.endedAt) { hm(b, sizeof b, r.endedAt); t.l2 = String("Finished ") + b + (r.online ? (r.parked ? ", mount parked" : ", mount not parked") : ""); }
+      break;
+    case RIG_LOST: t.word = "LOST"; t.col = C_NO;
+      t.l1 = (what.length() ? what + "  \xC2\xB7  " : String("")) + "frame " + String(r.frames);
+      if (r.endedAt) { hm(b, sizeof b, r.endedAt); t.l2 = String("NINA stopped answering at ") + b; }
+      break;
+    case RIG_ERROR: t.word = "ERROR"; t.col = C_NO;
+      t.l1 = r.error.length() ? r.error : String("NINA reports an error"); t.l2 = frames; break;
+    case RIG_IDLE: t.word = "IDLE"; t.col = C_IDLE;
+      t.l1 = "NINA running, no sequence"; t.l2 = r.parked ? "Mount parked" : r.tracking ? "Mount tracking" : "Mount not parked";
+      t.l3 = r.lastRun; t.right = ""; break;
+    case RIG_INACTIVE: t.word = "INACTIVE"; t.col = C_IDLE;
+      t.l1 = "Not running"; t.l2 = r.lastRun;
+      if (r.lastSeen) { hm(b, sizeof b, r.lastSeen); t.l3 = String("NINA offline since ") + b; }
+      t.right = ""; break;
+    default: t.word = "CHECKING"; t.col = C_IDLE; t.l1 = "Waiting for the first answer"; t.right = ""; break;
+  }
+  return t;
+}
+
+void uiDrawObservatory(const UiState& s, const Observatory& o, const String& settingsUrl) {
+  spr.fillScreen(c565(C_BG));
+  header(s, "Observatory");
+  bool any = o.roof.configured || o.safety.configured || o.sky.configured || o.rain.configured || o.nRigs || o.nPark;
+  if (!any) {
+    text("Observatory not set up", W / 2, OY + 110, fTitle, C_FG, top_center);
+    text("Add your roof, safety monitor, sky sensor and rigs", W / 2, OY + 156, fBody, C_MUTED, top_center, W - 40);
+    text(("on the settings page: " + settingsUrl).c_str(), W / 2, OY + 184, fBody, C_MUTED, top_center, W - 40);
+    spr.pushSprite(0, 0);
+    return;
+  }
+  char b[64], c[64];
+  time_t now = s.nowUtc;
+
+  // ---- roof ----
+  const char* rw = MINUS; uint32_t rcol = C_IDLE; String rsub = "Not set up";
+  int sh = o.roof.shutter;
+  if (o.roof.configured) {
+    if (!o.roof.online) { rw = "NO ANSWER"; rcol = C_MAYBE; rsub = o.roof.name.length() ? o.roof.name : String("Roof controller"); sh = -1; }
+    else {
+      switch (sh) {
+        case SHUTTER_OPEN: rw = "OPEN"; rcol = C_GO; break;
+        case SHUTTER_CLOSED: rw = "CLOSED"; rcol = C_MUTED; break;
+        case SHUTTER_OPENING: rw = "OPENING"; rcol = C_MAYBE; break;
+        case SHUTTER_CLOSING: rw = "CLOSING"; rcol = C_MAYBE; break;
+        default: rw = "ERROR"; rcol = C_NO; break;
+      }
+      if (sh == SHUTTER_ERROR) rsub = o.roof.error;
+      else if (o.roof.since) { hm(b, sizeof b, o.roof.since);
+        rsub = (sh == SHUTTER_OPEN ? "Open since " : sh == SHUTTER_CLOSED ? "Closed since " : "Started ") + String(b); }
+      else rsub = o.roof.name.length() ? o.roof.name : String("Roll-off roof");
+    }
+  }
+  // ---- safety ----
+  const char* sw = MINUS; uint32_t scol = C_IDLE;
+  if (o.safety.configured) { if (!o.safety.online && !o.safety.reason.length()) { sw = "NO DATA"; scol = C_MAYBE; } else if (o.safety.safe) { sw = "SAFE"; scol = C_GO; } else { sw = "UNSAFE"; scol = C_NO; } }
+  String rain; uint32_t rainCol = C_MUTED;
+  if (o.rain.configured) { rain = String("Rain sensor: ") + (!o.rain.online ? "no data" : o.rain.wet ? "WET" : "dry"); rainCol = !o.rain.online ? C_MAYBE : o.rain.wet ? C_NO : C_MUTED; }
+  String reason = (o.safety.configured && !o.safety.safe) ? o.safety.reason : String("");
+
+  // ---- sky ----
+  bool skyOk = o.sky.configured && o.sky.online;
+  float cl = skyOk ? o.sky.cloud : NAN;
+  uint32_t ccol = isnan(cl) ? C_IDLE : cl <= 30 ? C_GO : cl <= 60 ? C_MAYBE : C_NO;
+  char cloudTxt[12]; if (isnan(cl)) snprintf(cloudTxt, sizeof cloudTxt, "%s", MINUS); else snprintf(cloudTxt, sizeof cloudTxt, "%d%%", (int)lroundf(cl));
+  char sqm[16], lux[24], skyT[16], amb[24];
+  if (skyOk && !isnan(o.sky.sqm)) snprintf(sqm, sizeof sqm, "%.2f", o.sky.sqm); else snprintf(sqm, sizeof sqm, "%s", MINUS);
+  fmtLux(lux, sizeof lux, skyOk ? o.sky.lux : NAN);
+  fmtDeg(skyT, sizeof skyT, skyOk ? o.sky.skyT : NAN, 1);
+  if (skyOk && !isnan(o.sky.ambient)) { fmtDeg(c, sizeof c, o.sky.ambient, 1); snprintf(amb, sizeof amb, "air %s", c); } else amb[0] = 0;
+
+  // ---- rigs on this page ----
+  int pages = max(1, (o.nRigs + OBS_RIGS_PER_PAGE - 1) / OBS_RIGS_PER_PAGE), page = s.rigPage % pages;
+  int r0 = page * OBS_RIGS_PER_PAGE, r1 = min(o.nRigs, r0 + OBS_RIGS_PER_PAGE);
+  auto pageDots = [&](int x, int y) { if (pages < 2) return; for (int k = 0; k < pages; k++) spr.fillSmoothCircle(x + k * 12, y, k == page ? 3 : 2, c565(k == page ? C_FG : C_IDLE)); };
+  auto parkCol = [](const ObsPark& p) { return !p.online ? C_NO : p.parked ? C_GO : C_BLUE; };
+  auto parkWord = [](const ObsPark& p) { return !p.online ? "OFFLINE" : p.parked ? "PARKED" : "UNPARKED"; };
+
+  if (TALL) {
+    // roof + safety tiles
+    spr.fillSmoothRoundRect(12, 32, 224, 104, 10, c565(C_TILE)); spr.drawRoundRect(12, 32, 224, 104, 10, c565(C_LINE));
+    text("ROOF", 24, 52, fSmall, C_MUTED, baseline_left);
+    fitWord(rw, 24, 92, rcol, 134, fBig, fTitle, fBodyB);
+    text(rsub.c_str(), 24, 122, fBody, sh == SHUTTER_ERROR ? C_NO : C_MUTED, baseline_left, 200);
+    if (o.roof.configured) roofIcon(164, 52, 1.1f, sh, rcol);
+    spr.fillSmoothRoundRect(244, 32, 224, 104, 10, c565(C_TILE)); spr.drawRoundRect(244, 32, 224, 104, 10, c565(C_LINE));
+    text("SAFETY", 256, 52, fSmall, C_MUTED, baseline_left);
+    glowDot(268, 79, 9, scol, o.safety.configured);
+    fitWord(sw, 286, 92, scol, 170, fBig, fTitle, fBodyB);
+    if (reason.length()) {
+      if (rain.length()) text(rain.c_str(), 256, 113, fSmall, rainCol, baseline_left, 204);
+      text(reason.c_str(), 256, rain.length() ? 130 : 122, fSmall, C_NO, baseline_left, 204);
+    } else if (rain.length()) text(rain.c_str(), 256, 122, fBody, rainCol, baseline_left, 204);
+
+    // sky
+    spr.fillSmoothRoundRect(12, 144, 456, 78, 10, c565(C_TILE)); spr.drawRoundRect(12, 144, 456, 78, 10, c565(C_LINE));
+    text("CLOUD COVER", 24, 164, fSmall, C_MUTED, baseline_left);
+    text(cloudTxt, 24, 202, fBig, ccol, baseline_left);
+    barH(104, 188, 104, 9, isnan(cl) ? 0 : cl / 100, ccol);
+    struct { const char* l; const char* v; const char* u; } cols[] = {{"SQM", sqm, "mag/arcsec\xC2\xB2"}, {"BRIGHTNESS", lux, "lux"}, {"SKY TEMP", skyT, amb}};
+    for (int k = 0; k < 3; k++) {
+      int x = 224 + k * 82;
+      text(cols[k].l, x, 164, fSmall, C_MUTED, baseline_left, 80);
+      text(cols[k].v, x, 192, fBodyB, strcmp(cols[k].v, MINUS) ? C_FG : C_IDLE, baseline_left, 80);
+      if (strcmp(cols[k].v, MINUS)) text(cols[k].u, x, 211, fSmall, C_IDLE, baseline_left, 80);
+    }
+
+    // park sensors: pills when they fit, else coloured dots
+    text("MOUNT PARK SENSORS", 12, 244, fSmall, C_MUTED, baseline_left);
+    if (!o.nPark) text("None heard yet", 12, 268, fBody, C_IDLE, baseline_left);
+    else {
+      int need = 0;
+      for (int i = 0; i < o.nPark; i++) { spr.setFont(&fBody.font); need += spr.textWidth(o.park[i].name.c_str()) + 6 + pillWidth(parkWord(o.park[i])) + 14; }
+      int px = 12;
+      for (int i = 0; i < o.nPark; i++) {
+        const ObsPark& p = o.park[i];
+        if (need <= 456) { text(p.name.c_str(), px, 268, fBody, C_FG, baseline_left); spr.setFont(&fBody.font); px += spr.textWidth(p.name.c_str()) + 6; px += pill(px, 252, parkWord(p), parkCol(p), C_BG) + 14; }
+        else { spr.fillSmoothCircle(px + 5, 262, 5, c565(parkCol(p))); text(p.name.c_str(), px + 15, 268, fBody, C_FG, baseline_left); spr.setFont(&fBody.font); px += spr.textWidth(p.name.c_str()) + 30; }
+      }
+    }
+
+    // rigs
+    text("RIGS", 12, 296, fSmall, C_MUTED, baseline_left); pageDots(54, 291);
+    if (!o.nRigs) text("No rigs set up", 12, 322, fBody, C_IDLE, baseline_left);
+    for (int i = r0; i < r1; i++) {
+      const ObsRig& r = o.rigs[i]; RigText t = rigText(r, now);
+      int y = 304 + (i - r0) * 84;
+      spr.fillSmoothRoundRect(12, y, 456, 76, 10, c565(C_TILE)); spr.drawRoundRect(12, y, 456, 76, 10, c565(C_LINE));
+      glowDot(28, y + 19, 6, t.col, t.glow);
+      text(r.name.c_str(), 42, y + 26, fBodyB, C_FG, baseline_left, 106);
+      pill(152, y + 9, t.word, t.col);
+      text(t.l1.c_str(), 252, y + 25, fBody, C_FG, baseline_left, 204);
+      text(t.l2.c_str(), 42, y + 48, fBody, t.word[0] == 'L' ? C_NO : C_MUTED, baseline_left, 250);
+      if (t.l3.length()) text(t.l3.c_str(), 42, y + 68, fSmall, C_IDLE, baseline_left, 250);
+      if (t.right.length()) text(t.right.c_str(), 456, y + 68, fSmall, C_MUTED, baseline_right, 180);
+    }
+  } else {
+    // roof, safety, cloud tiles
+    spr.fillSmoothRoundRect(12, 32, 148, 70, 10, c565(C_TILE)); spr.drawRoundRect(12, 32, 148, 70, 10, c565(C_LINE));
+    text("ROOF", 22, 50, fSmall, C_MUTED, baseline_left);
+    fitWord(rw, 22, 86, rcol, 80, fTitle, fBodyB, fBody);
+    if (o.roof.configured) roofIcon(104, 50, 0.8f, sh, rcol);
+    spr.fillSmoothRoundRect(166, 32, 148, 70, 10, c565(C_TILE)); spr.drawRoundRect(166, 32, 148, 70, 10, c565(C_LINE));
+    text("SAFETY", 176, 50, fSmall, C_MUTED, baseline_left);
+    fitWord(sw, 176, 86, scol, 128, fTitle, fBodyB, fBody);
+    spr.fillSmoothRoundRect(320, 32, 148, 70, 10, c565(C_TILE)); spr.drawRoundRect(320, 32, 148, 70, 10, c565(C_LINE));
+    text("CLOUD", 330, 50, fSmall, C_MUTED, baseline_left);
+    text(cloudTxt, 330, 86, fTitle, ccol, baseline_left);
+    barH(392, 73, 64, 8, isnan(cl) ? 0 : cl / 100, ccol);
+    // one line: why it's unsafe, or the sky numbers
+    String line;
+    if (reason.length()) line = "Unsafe: " + reason + (rain.length() ? "   \xC2\xB7   " + rain : String(""));
+    else {
+      if (o.rain.configured) line = String("Rain ") + (!o.rain.online ? "no data" : o.rain.wet ? "WET" : "dry") + "   \xC2\xB7   ";
+      if (skyOk) line += String("SQM ") + sqm + "   \xC2\xB7   " + lux + " lux   \xC2\xB7   sky " + skyT + "   \xC2\xB7   ";
+      line += rsub;
+    }
+    text(line.c_str(), 12, 124, fSmall, reason.length() ? C_NO : C_MUTED, baseline_left, 456);
+    // park sensors
+    text("PARK", 12, 150, fSmall, C_MUTED, baseline_left);
+    if (!o.nPark) text("None heard yet", 56, 150, fSmall, C_IDLE, baseline_left);
+    int px = 56;
+    for (int i = 0; i < o.nPark && px < 430; i++) {
+      spr.fillSmoothCircle(px + 4, 145, 4, c565(parkCol(o.park[i])));
+      text(o.park[i].name.c_str(), px + 13, 150, fSmall, C_FG, baseline_left, 140);
+      spr.setFont(&fSmall.font); px += min(140, (int)spr.textWidth(o.park[i].name.c_str())) + 24;
+    }
+    pageDots(452, 146);
+    if (!o.nRigs) text("No rigs set up", 12, 186, fBody, C_IDLE, baseline_left);
+    for (int i = r0; i < r1; i++) {
+      const ObsRig& r = o.rigs[i]; RigText t = rigText(r, now);
+      int y = 162 + (i - r0) * 76;
+      spr.fillSmoothRoundRect(12, y, 456, 68, 10, c565(C_TILE)); spr.drawRoundRect(12, y, 456, 68, 10, c565(C_LINE));
+      glowDot(26, y + 16, 5, t.col, t.glow);
+      text(r.name.c_str(), 38, y + 22, fBody, C_FG, baseline_left, 92);
+      pill(134, y + 6, t.word, t.col);
+      text(t.l1.c_str(), 236, y + 21, fSmall, C_FG, baseline_left, 222);
+      text(t.l2.c_str(), 38, y + 42, fSmall, t.word[0] == 'L' ? C_NO : C_MUTED, baseline_left, 270);
+      if (t.l3.length()) text(t.l3.c_str(), 38, y + 61, fSmall, C_IDLE, baseline_left, 270);
+      if (t.right.length()) text(t.right.c_str(), 458, y + 42, fSmall, C_MUTED, baseline_right, 150);
     }
   }
   spr.pushSprite(0, 0);

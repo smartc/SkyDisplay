@@ -8,6 +8,7 @@
 #include <WiFiManager.h>
 #include "board.h"
 #include "ui.h"
+#include "obs.h"
 
 static WebServer server(80);
 static WebHooks hooks;
@@ -41,6 +42,9 @@ input[type=number]{-moz-appearance:textfield}input::-webkit-inner-spin-button{op
 input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}.hint{font-size:.8rem;color:var(--muted)}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}button,.btn{font:inherit;background:#1b2742;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer;text-decoration:none}
 button.primary{background:var(--accent);color:#04101f;border-color:var(--accent);font-weight:600}button.warn{border-color:var(--warn);color:var(--warn)}
+.rigrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) auto;gap:8px 10px;align-items:center;margin-bottom:8px}
+.righead{font-size:.88rem;color:var(--muted);margin-bottom:4px}.righead span:last-child{grid-column:2/-1}
+@media(max-width:520px){.rigrow{grid-template-columns:minmax(0,1fr) auto}.rigrow input:first-child{grid-column:1/-1}.righead{display:none}}
 .check{display:flex;gap:8px;align-items:center;color:var(--fg);min-height:40px}.check input{width:18px;height:18px}table{border-collapse:collapse;font-size:.9rem}td{padding:2px 14px 2px 0}td:first-child{color:var(--muted)}
 )CSS";
 
@@ -120,7 +124,7 @@ static void handleRoot() {
   h += F("'></label><label>Footer rotation (seconds)<input type='number' min='2' max='30' name='footSec' value='");
   h += String(cfg.footerSeconds);
   h += F("'></label><label>Start-up screen<select name='startScr'>");
-  h += opt(0, cfg.startScreen, "Forecast") + opt(1, cfg.startScreen, "Weather") + opt(2, cfg.startScreen, "Status");
+  h += opt(0, cfg.startScreen, "Forecast") + opt(1, cfg.startScreen, "Weather") + opt(3, cfg.startScreen, "Observatory") + opt(2, cfg.startScreen, "Status");
   h += F("</select><span class='hint'>Also where the display goes back to after 2 minutes untouched.</span></label></div></section>");
 
   h += F("<section><h2>Scoring</h2><div class='grid'><label>Good hour: cloud up to (%)<input type='number' min='0' max='60' name='goodCloud' value='");
@@ -131,15 +135,75 @@ static void handleRoot() {
   h += String(cfg.goMinHours);
   h += F("'></label></div></section>");
 
-  h += F("<section><h2>Weather Underground</h2><div class='grid'><label>Station ID<input name='wuStation' autocapitalize='characters' value='");
+  h += F("<section><h2>Weather</h2><div class='grid'>"
+         "<label style='grid-column:1/-1'>EcoWitt gateway (optional)<input name='ecowitt' autocapitalize='none' autocorrect='off' spellcheck='false' value='");
+  h += esc(cfg.ecowittHost);
+  h += F("'><span class='hint'>Address of an EcoWitt gateway (e.g. GW1100, GW2000, GW3000) on this network. When set, current conditions"
+         " come from it every minute, with no Weather Underground calls; the forecast still comes from Weather Underground.</span></label>"
+         "<label>Weather Underground station ID<input name='wuStation' autocapitalize='characters' value='");
   h += esc(cfg.wuStation);
-  h += F("'><span class='hint'>Your personal weather station ID, e.g. KCASANFR123.</span></label>"
+  h += F("'><span class='hint'>Your personal weather station ID, e.g. KCASANFR123. Used for current conditions when there's no EcoWitt"
+         " gateway, and once at start-up to fill in the 24-hour trace.</span></label>"
          "<label>API key<input type='password' name='wuKey' autocomplete='off' placeholder='");
   if (cfg.wuKey.length() >= 4) h += "(set, ends in " + esc(cfg.wuKey.substring(cfg.wuKey.length() - 4)) + ")";
   else h += F("(not set)");
-  h += F("'><span class='hint'>From your Weather Underground account, under API Keys. Leave blank to keep the current key.</span></label>"
+  h += F("'><span class='hint'>From your Weather Underground account, under API Keys; needed for the forecast. Leave blank to keep the current key."
+         " Each display uses about 24 calls a day with EcoWitt, about 170 without (the free limit is 1,500 a day per key).</span></label>"
          "<label class='check'><input type='checkbox' name='clearWuKey' value='1'> Remove the API key</label>"
          "</div></section>");
+
+  // ---- observatory ----
+  h += F("<section><h2>Observatory</h2><div class='grid'><label class='check' style='grid-column:1/-1'><input type='checkbox' name='obsEn' value='1'");
+  if (cfg.obsEnabled) h += F(" checked");
+  h += F("> Show the observatory screen</label>"
+         "<p class='hint' style='grid-column:1/-1;margin:0'>ASCOM Alpaca devices: write <code>host</code>, <code>host:port</code> or <code>host:port/device</code>"
+         " (port 11111 and device 0 if left out; https:// for a device behind a proxy). Leave a field blank to leave it off the screen.</p>");
+  struct { const char* name; const char* label; const String* val; const char* hint; } dev[] = {
+    {"oRoof", "Roof (Alpaca Dome)", &cfg.obsRoof, ""},
+    {"oSafe", "Safety verdict (Alpaca SafetyMonitor)", &cfg.obsSafety, "When it reports unsafe, Llama Watch's reason is shown too."},
+    {"oRain", "Rain sensor", &cfg.obsRain, "An Alpaca SafetyMonitor, or udp to use a sensor's UDP safety broadcast (udp:name picks one)."},
+    {"oSky", "Sky conditions (Alpaca ObservingConditions)", &cfg.obsSky, "Cloud cover, SQM, sky brightness and sky temperature."}};
+  for (auto& d : dev) {
+    h += "<label>" + String(d.label) + "<input name='" + d.name + "' id='" + d.name + "' autocapitalize='none' autocorrect='off' spellcheck='false' value='" + esc(*d.val) + "'>";
+    if (*d.hint) h += "<span class='hint'>" + String(d.hint) + "</span>";
+    h += "</label>";
+  }
+  h += F("<div style='grid-column:1/-1'><div class='row'><button type='button' id='findBtn'>Find Alpaca devices</button>"
+         "<span class='hint' id='findMsg'>Searches this network (takes a few seconds).</span></div><div id='found' style='margin-top:8px'></div></div>"
+         "<p class='hint' style='grid-column:1/-1;margin:0'>Mount park sensors and safety sensors that broadcast on UDP port 23435 (Dark Dragons format) appear by themselves."
+         " Rigs use NINA's Advanced API plugin: <code>host</code> or <code>host:port</code> (port 1888 if left out).</p>");
+  // Rigs: one row each (name, NINA address, Remove), plus Add rig. Rows are renumbered rN0/rH0... before saving.
+  h += F("<div style='grid-column:1/-1'><h3 style='font-size:.95rem;margin:4px 0 8px'>Rigs</h3>"
+         "<div class='rigrow righead'><span>Name</span><span>NINA address</span></div><div id='rigs'>");
+  const char* ROW_A = "<div class='rigrow'><input aria-label='Rig name' placeholder='e.g. East pier' value='";
+  const char* ROW_B = "'><input aria-label='NINA address' placeholder='host or host:port' autocapitalize='none' autocorrect='off' spellcheck='false' value='";
+  const char* ROW_C = "'><button type='button' class='rm'>Remove</button></div>";
+  int shown = 0;
+  for (int i = 0; i < Settings::MAX_RIGS; i++) {
+    if (!cfg.rigHost[i].length() && !cfg.rigName[i].length()) continue;
+    h += ROW_A + esc(cfg.rigName[i]) + ROW_B + esc(cfg.rigHost[i]) + ROW_C; shown++;
+  }
+  if (!shown) h += String(ROW_A) + ROW_B + ROW_C;  // start with one empty row
+  h += F("</div><div class='row'><button type='button' id='addRig'>Add rig</button><span class='hint' id='rigMax'></span></div></div>");
+  h += "<template id='rigTpl'>" + String(ROW_A) + ROW_B + ROW_C + "</template>";
+  h += "<script>(()=>{const MAX=" + String(Settings::MAX_RIGS) + ",list=document.getElementById('rigs'),add=document.getElementById('addRig'),note=document.getElementById('rigMax');"
+       "const sync=()=>{[...list.children].forEach((r,i)=>{const [n,a]=r.querySelectorAll('input');n.name='rN'+i;a.name='rH'+i;});"
+       "const full=list.children.length>=MAX;add.disabled=full;note.textContent=full?'Up to '+MAX+' rigs.':'';};"
+       "list.addEventListener('click',e=>{if(e.target.classList.contains('rm')){e.target.parentElement.remove();sync();}});"
+       "add.addEventListener('click',()=>{list.appendChild(document.getElementById('rigTpl').content.cloneNode(true));sync();list.lastElementChild.querySelector('input').focus();});"
+       "sync();})();</script>";
+  h += F("<label>Show a finished night's run until (hour)<input type='number' min='0' max='23' name='oHold' value='");
+  h += String(cfg.obsHoldHour);
+  h += F("'><span class='hint'>NINA only runs while imaging. After a run the rig shows Finished (or Lost, if NINA stopped mid-sequence) until this hour, then Inactive.</span></label></div></section>"
+         "<script>document.getElementById('findBtn').addEventListener('click',async()=>{const m=document.getElementById('findMsg'),f=document.getElementById('found');"
+         "m.textContent='Searching...';f.innerHTML='';try{const r=await fetch('/alpaca/discover');const l=await r.json();"
+         "m.textContent=l.length?l.length+' found. Pick what each one is for, then Save settings.':'None found. Devices on another network or VLAN have to be typed in.';"
+         "const use={Dome:[['oRoof','Use as roof']],SafetyMonitor:[['oSafe','Use as safety'],['oRain','Use as rain sensor']],ObservingConditions:[['oSky','Use as sky conditions']]};"
+         "for(const d of l){const row=document.createElement('div');row.className='row';row.style.margin='4px 0';"
+         "const t=document.createElement('span');t.textContent=d.name+' ('+d.type+') at '+d.addr;row.appendChild(t);"
+         "for(const [id,lab] of (use[d.type]||[])){const b=document.createElement('button');b.type='button';b.textContent=lab;"
+         "b.onclick=()=>{document.getElementById(id).value=d.addr;b.textContent='Set';};row.appendChild(b);}f.appendChild(row);}}"
+         "catch(e){m.textContent='Search failed: '+e;}});</script>");
 
   h += F("<section><h2>Device</h2><div class='grid'><label>Network name (hostname)<input name='host' value='");
   h += esc(cfg.hostname);
@@ -228,17 +292,31 @@ static void handleSave() {
   cfg.nightFrom = argInt("nightFrom", 0, 23, cfg.nightFrom);
   cfg.nightTo = argInt("nightTo", 0, 23, cfg.nightTo);
   cfg.footerSeconds = argInt("footSec", 2, 30, cfg.footerSeconds);
-  cfg.startScreen = argInt("startScr", 0, 2, cfg.startScreen);
+  cfg.startScreen = argInt("startScr", 0, 3, cfg.startScreen);
+  cfg.obsEnabled = server.hasArg("obsEn");
+  cfg.obsRoof = arg("oRoof"); cfg.obsSafety = arg("oSafe"); cfg.obsRain = arg("oRain"); cfg.obsSky = arg("oSky");
+  {
+    int n = 0;  // rows without an address are dropped; the rest move up so the list has no gaps
+    for (int i = 0; i < Settings::MAX_RIGS; i++) {
+      String name = arg(("rN" + String(i)).c_str()), host = arg(("rH" + String(i)).c_str());
+      if (!host.length()) continue;
+      cfg.rigName[n] = name; cfg.rigHost[n] = host; n++;
+    }
+    for (int i = n; i < Settings::MAX_RIGS; i++) { cfg.rigName[i] = ""; cfg.rigHost[i] = ""; }
+  }
+  cfg.obsHoldHour = argInt("oHold", 0, 23, cfg.obsHoldHour);
   cfg.goodMaxCloud = argInt("goodCloud", 0, 60, cfg.goodMaxCloud);
   cfg.goodMinTrans = argInt("goodTrans", 2, 5, cfg.goodMinTrans);
   cfg.goMinHours = argInt("goHours", 1, 12, cfg.goMinHours);
   if (arg("wuStation").length()) { cfg.wuStation = arg("wuStation"); cfg.wuStation.toUpperCase(); }
+  if (server.hasArg("ecowitt")) cfg.ecowittHost = arg("ecowitt");
   if (server.hasArg("clearWuKey")) cfg.wuKey = "";
   else if (arg("wuKey").length()) cfg.wuKey = arg("wuKey");
   if (arg("host").length()) cfg.hostname = arg("host");
   if (server.hasArg("clearPass")) cfg.webPassword = "";
   else if (server.arg("webPass").length()) cfg.webPassword = server.arg("webPass");
   settingsSave();
+  if (cfg.obsEnabled) obsBegin();
   bool chartChanged = cfg.chartUrl != oldUrl;
   bool timeChanged = cfg.tz != oldTz || cfg.ntp1 != oldN1 || cfg.ntp2 != oldN2 || cfg.ntpHours != oldNtpHours
                   || cfg.lat != oldLat || cfg.lon != oldLon;
@@ -279,6 +357,17 @@ void webBegin(const WebHooks& h) {
   server.on("/restart", HTTP_POST, [] { if (!authOk()) return; server.send(200, "text/plain", "Restarting..."); delay(500); ESP.restart(); });
   // Firmware upload (ElegantOTA at /update, framed by /firmware). Same password as the settings page (user admin), if set.
   server.on("/firmware", HTTP_GET, handleFirmware);
+  // Raw RGB565 dump of the screen (same format as the serial 's' command; tools/shot_to_png.py converts it).
+  // ?screen=0..3 switches the display to that screen first.
+  server.on("/screenshot", HTTP_GET, [] {
+    if (!authOk()) return;
+    if (server.hasArg("screen")) hooks.showScreen(server.arg("screen").toInt());
+    WiFiClient cl = server.client();
+    cl.print("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n");
+    uiScreenshot(cl);
+    cl.stop();
+  });
+  server.on("/alpaca/discover", HTTP_GET, [] { if (!authOk()) return; server.send(200, "application/json", obsDiscoverJson()); });
   ElegantOTA.begin(&server);
   if (cfg.webPassword.length()) ElegantOTA.setAuth("admin", cfg.webPassword.c_str());
   ElegantOTA.onStart([] {

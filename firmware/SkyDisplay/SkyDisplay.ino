@@ -4,7 +4,7 @@
 // whether now, tonight and tomorrow night are worth setting up the rigs.
 // Settings page: http://skydisplay.local/ (or the IP shown in the serial log).
 //
-// Screens (swipe left/right): forecast, weather (Weather Underground), status.
+// Screens (swipe left/right): forecast, weather (Weather Underground), observatory (when turned on), status.
 // Touch: tap = next footer page, long press = dim.
 // Serial commands (115200 on the WT32, 460800 on the Indicator): s = screenshot dump, r = check chart and weather now, d = dump decoded rows,
 //   a = sun/moon times, n = next screen, i = info, W = forget Wi-Fi and restart.
@@ -22,13 +22,21 @@
 #include "web.h"
 #include "weather.h"
 #include "tls.h"
+#include "obs.h"
 
 static Forecast fc;
 static UiState ui;
 static Weather wx;
-// Weather polling: current every 5 min, 24 h history every 15 min, forecast hourly (~410 calls/day of 1,500).
+static Observatory obs;
+static volatile uint32_t nextObsMs = 0;  // observatory poll: every 15 s while its screen is shown, else every 60 s
+static const uint32_t OBS_FAST_MS = 15000, OBS_SLOW_MS = 60000;
+// Weather polling. Current conditions: EcoWitt every minute (local, free) or the WU station every 10 min.
+// The 24 h trace is built on the device; WU history is read once (at start-up or a settings change) to seed it.
+// Forecast hourly. Per display that's 24 WU calls a day with EcoWitt, about 170 without (limit 1,500 per key).
 static volatile uint32_t nextWxMs[3] = {0, 0, 0};
-static const uint32_t WX_PERIOD_MS[3] = {5UL * 60000, 15UL * 60000, 60UL * 60000};
+static const uint32_t WX_CURRENT_ECOWITT_MS = 60000UL, WX_CURRENT_WU_MS = 10UL * 60000, WX_FORECAST_MS = 60UL * 60000;
+static const uint32_t WX_NEVER = 0x7FFFFFFF;  // history after it has seeded the trace
+static uint8_t wxFails[3] = {0, 0, 0};         // consecutive failures per part, for the retry backoff
 static String wxSetupKey;  // station + key the current data came from; a change resets the weather
 static volatile uint32_t nextCheckMs = 0;  // shared with the network task
 static uint32_t nextDrawMs = 0, nextSkyMs = 0, lastTouchMs = 0;
@@ -82,16 +90,32 @@ static void buildStatus(StatusInfo& st) {
   R("FIRMWARE", String(FIRMWARE_VERSION) + ", up " + (up >= 60 ? String(up / 60) + "h " : "") + String(up % 60) + "m");
   if (!weatherConfigured()) R("WEATHER", "Not set up");
   else if (wx.error.length()) R("WEATHER", wx.error, true);
-  else R("WEATHER", cfg.wuStation + (wx.haveCurrent ? ", " + fmtLocal(wx.obsUtc, "%H:%M") : String(", waiting")));
+  else if (wx.wuError.length()) R("WEATHER", wx.wuError, true);
+  else R("WEATHER", (weatherUsesEcowitt() ? String("EcoWitt") : cfg.wuStation) + (wx.haveCurrent ? ", " + fmtLocal(wx.obsUtc, "%H:%M") : String(", waiting")));
   st.qrUrl = "http://" + WiFi.localIP().toString() + "/";
+}
+
+// Swipe order; the observatory screen only when it's turned on.
+static int screenOrder(int* out) {
+  int n = 0; out[n++] = SCREEN_FORECAST; out[n++] = SCREEN_WEATHER;
+  if (cfg.obsEnabled) out[n++] = SCREEN_OBS;
+  out[n++] = SCREEN_STATUS; return n;
+}
+static int homeScreen() { return (cfg.startScreen == SCREEN_OBS && !cfg.obsEnabled) ? SCREEN_FORECAST : cfg.startScreen; }
+static void stepScreen(int d) {
+  int ord[SCREEN_COUNT]; int n = screenOrder(ord), pos = 0;
+  for (int i = 0; i < n; i++) if (ord[i] == ui.screen) pos = i;
+  ui.screen = ord[(pos + d + n) % n];
 }
 
 static void drawScreen() {
   ui.nowUtc = nowUtc();
+  { int ord[SCREEN_COUNT]; ui.dotCount = screenOrder(ord); ui.dotIndex = 0; for (int i = 0; i < ui.dotCount; i++) if (ord[i] == ui.screen) ui.dotIndex = i; }
   ui.needsSetup = !chartTarget().ok;  // fresh device: show the first-run QR code instead of the forecast
   ui.settingsUrl = "http://" + WiFi.localIP().toString() + "/";
   if (ui.screen == SCREEN_STATUS) { StatusInfo st; buildStatus(st); uiDrawStatus(ui, st); }
   else if (ui.screen == SCREEN_WEATHER) uiDrawWeather(ui, wx, weatherConfigured(), "http://" + WiFi.localIP().toString() + "/");
+  else if (ui.screen == SCREEN_OBS) uiDrawObservatory(ui, obs, "http://" + WiFi.localIP().toString() + "/");
   else uiDraw(ui);
 }
 
@@ -159,30 +183,58 @@ static void netCheckChart() {
 
 // At most one weather request per pass.
 static void netPollWeather() {
-  String station, key; double lat, lon; Weather work; bool configured;
+  WxSetup s; Weather work; bool configured; String setupKey;
   {
     DataGuard g;
-    String setup = cfg.wuStation + "|" + cfg.wuKey;
-    if (setup != wxSetupKey) { wx = Weather(); wxSetupKey = setup; nextWxMs[0] = nextWxMs[1] = nextWxMs[2] = millis(); redrawNeeded = true; }
+    String setup = cfg.wuStation + "|" + cfg.wuKey + "|" + cfg.ecowittHost;
+    if (setup != wxSetupKey) { wx = Weather(); wxSetupKey = setup; nextWxMs[0] = nextWxMs[1] = nextWxMs[2] = millis(); wxFails[0] = wxFails[1] = wxFails[2] = 0; redrawNeeded = true; }
     configured = weatherConfigured();
-    station = cfg.wuStation; key = cfg.wuKey;
-    lat = cfg.lat; lon = cfg.lon;
-    if (lat == 0 && lon == 0) { lat = fc.siteLat; lon = fc.siteLon; }
+    s.station = cfg.wuStation; s.key = cfg.wuKey; s.ecowitt = cfg.ecowittHost;
+    s.lat = cfg.lat; s.lon = cfg.lon;
+    if (s.lat == 0 && s.lon == 0) { s.lat = fc.siteLat; s.lon = fc.siteLon; }
+    setupKey = setup;
     work = wx;
   }
   if (!configured) return;
+  bool eco = s.ecowitt.length() > 0;
   for (int p = 0; p < 3; p++) {
     if ((int32_t)(millis() - nextWxMs[p]) < 0) continue;
-    if (p == WX_FORECAST && !work.haveCurrent) continue;  // fetch current first
-    bool ok = weatherFetch((WxPart)p, work, station, key, lat, lon);
+    if (p != WX_CURRENT && !work.haveCurrent) continue;  // fetch current first
+    bool ok = weatherFetch((WxPart)p, work, s);
     // On failure retry in 2 minutes (a rejected key waits the full period, to stay well inside the call limit).
-    bool keyProblem = work.error.indexOf("API key") >= 0 || work.error.indexOf("not found") >= 0;
+    String why = p == WX_CURRENT ? work.error : work.wuError;
+    bool keyProblem = why.indexOf("API key") >= 0 || why.indexOf("not found") >= 0;
+    uint32_t period = p == WX_CURRENT ? (eco ? WX_CURRENT_ECOWITT_MS : WX_CURRENT_WU_MS) : p == WX_HISTORY ? WX_NEVER : WX_FORECAST_MS;
     DataGuard g;
-    if (wxSetupKey == station + "|" + key) wx = work;  // ignore results if the settings changed meanwhile
-    nextWxMs[p] = millis() + (ok || keyProblem ? WX_PERIOD_MS[p] : 2UL * 60000);
+    if (wxSetupKey == setupKey) wx = work;  // ignore results if the settings changed meanwhile
+    // Failures back off: 2, 4, 8, 16, then every 30 min (failed calls count against the WU limit too).
+    // The history only seeds the trace, so it gives up after 3 tries until the next restart or settings change.
+    wxFails[p] = ok ? 0 : (uint8_t)min(wxFails[p] + 1, 10);
+    uint32_t retry = (eco && p == WX_CURRENT) ? WX_CURRENT_ECOWITT_MS : min(30UL * 60000, (2UL * 60000) << min((int)wxFails[p] - 1, 4));
+    if (!ok && p == WX_HISTORY && wxFails[p] >= 3) retry = WX_NEVER;
+    nextWxMs[p] = millis() + (ok || keyProblem ? period : retry);
     redrawNeeded = true;
     return;
   }
+}
+
+static void netPollObservatory() {
+  ObsConfig c; Observatory work;
+  {
+    DataGuard g;
+    if (!cfg.obsEnabled) return;
+    c.roof = cfg.obsRoof; c.safety = cfg.obsSafety; c.rain = cfg.obsRain; c.sky = cfg.obsSky; c.holdHour = cfg.obsHoldHour;
+    for (int i = 0; i < OBS_MAX_RIGS; i++) { c.rigName[i] = cfg.rigName[i]; c.rigHost[i] = cfg.rigHost[i]; }
+    work = obs;
+  }
+  uint32_t t0 = millis();
+  obsPoll(work, c);
+  DataGuard g;
+  obs = work;
+  bool shown = ui.screen == SCREEN_OBS;
+  if (shown) redrawNeeded = true;
+  nextObsMs = millis() + (shown ? OBS_FAST_MS : OBS_SLOW_MS);
+  if (millis() - t0 > 5000) logf("[obs] poll took %u ms\n", (unsigned)(millis() - t0));
 }
 
 static void netTask(void*) {
@@ -190,20 +242,26 @@ static void netTask(void*) {
     if (WiFi.status() == WL_CONNECTED && nowUtc()) {
       if ((int32_t)(millis() - nextCheckMs) >= 0) netCheckChart();
       netPollWeather();
+      if ((int32_t)(millis() - nextObsMs) >= 0) netPollObservatory();
     }
     vTaskDelay(pdMS_TO_TICKS(250));
   }
 }
 
 // ---------- web hooks ----------
-static void webCheckNow() { nextCheckMs = 0; nextWxMs[0] = nextWxMs[1] = nextWxMs[2] = millis(); }
+static void webCheckNow() { nextCheckMs = 0; nextWxMs[0] = nextWxMs[2] = millis(); nextObsMs = millis(); }  // history only seeds once
 static void webApply(bool chartChanged, bool timeChanged) {
   if (chartChanged) { fc.valid = false; netForgetEtag(); nextCheckMs = 0; }
   if (timeChanged) { applyTime(); nextSkyMs = 0; }
   currentBacklight = -1;  // re-apply brightness
+  nextObsMs = millis();   // observatory devices may have changed
   uint32_t soonest = millis() + (uint32_t)cfg.pollMinutes * 60 * 1000;
   if ((int32_t)(nextCheckMs - soonest) > 0) nextCheckMs = soonest;
   nextDrawMs = 0;
+}
+static void webShowScreen(int s) {
+  if (s < 0 || s >= SCREEN_COUNT || (s == SCREEN_OBS && !cfg.obsEnabled)) return;
+  ui.screen = s; lastTouchMs = millis(); drawScreen();
 }
 static String webStatus() {
   String s = "Firmware " FIRMWARE_VERSION " | chart " + chartTarget().key;
@@ -307,10 +365,11 @@ void setup() {
   for (int i = 0; i < 40 && !nowUtc(); i++) delay(250);
   Serial.printf("[main] clock %s, NTP re-sync every %u h\n", nowUtc() ? "set" : "NOT set yet", (unsigned)(sntp_get_sync_interval() / 3600000UL));
 
-  webBegin({webCheckNow, webApply, webStatus});
+  webBegin({webCheckNow, webApply, webStatus, webShowScreen});
   httpsBegin(cfg.hostname);  // HTTPS location page for "Use my location" (browsers need HTTPS for GPS)
   ui.f = &fc;
-  ui.screen = cfg.startScreen;
+  ui.screen = homeScreen();
+  if (cfg.obsEnabled) obsBegin();
   lastTouchMs = millis();
   // Network work (chart + weather) on core 0, so drawing and touch on core 1 never wait for it.
   xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, nullptr, 0);
@@ -343,8 +402,8 @@ void loop() {
     else if (c == 'r') webCheckNow();
     else if (c == 'd') dumpRows();
     else if (c == 'a') printSky();
-    else if (c == 'n') { ui.screen = (ui.screen + 1) % SCREEN_COUNT; lastTouchMs = millis(); drawScreen(); }  // next screen (testing)
-    else if (c >= '0' && c <= '2') { ui.screen = c - '0'; lastTouchMs = millis(); drawScreen(); }      // jump to a screen (testing)
+    else if (c == 'n') { stepScreen(1); lastTouchMs = millis(); drawScreen(); }  // next screen (testing)
+    else if (c >= '0' && c <= '3') { ui.screen = c - '0'; lastTouchMs = millis(); if (ui.screen == SCREEN_OBS) nextObsMs = millis(); drawScreen(); }  // jump to a screen (testing)
     // Previews of the setup screens (testing); the next redraw returns to normal.
     else if (c == 'q') { uiWifiSetupScreen(SETUP_AP_NAME, "http://192.168.4.1/"); nextDrawMs = millis() + 15000; }
     else if (c == 'Q') { UiState p = ui; p.nowUtc = nowUtc(); p.settingsUrl = "http://" + WiFi.localIP().toString() + "/"; uiFirstRunScreen(p); nextDrawMs = millis() + 15000; }
@@ -380,12 +439,14 @@ void loop() {
     } else {
       if (inNightHours()) nightWakeUntilMs = millis() + keepBright;
       if (te == TOUCH_SWIPE_LEFT || te == TOUCH_SWIPE_RIGHT) {
-        int d = te == TOUCH_SWIPE_LEFT ? 1 : -1;
-        ui.screen = (ui.screen + d + SCREEN_COUNT) % SCREEN_COUNT;
+        stepScreen(te == TOUCH_SWIPE_LEFT ? 1 : -1);
         Serial.printf("[main] swipe: screen %d\n", ui.screen);
+        if (ui.screen == SCREEN_OBS && (int32_t)(nextObsMs - millis()) > (int32_t)OBS_FAST_MS) nextObsMs = millis();  // fresh data soon
       } else if (ui.screen == SCREEN_FORECAST) {
         ui.footerPage = (ui.footerPage + 1) % FOOTER_PAGES;
         Serial.printf("[main] tap: footer page %d\n", ui.footerPage);
+      } else if (ui.screen == SCREEN_OBS) {
+        ui.rigPage++;  // next two rigs (wraps when drawn)
       }
     }
     // Redraw now; the rotation timer restarts from here.
@@ -399,10 +460,12 @@ void loop() {
   if (bl != currentBacklight) { uiSetBacklight(bl); currentBacklight = bl; }
 
   // Footer rotation: advance a page, then draw. A tap already drew, so it skips one advance.
-  if (ui.screen != cfg.startScreen && millis() - lastTouchMs > SCREEN_RETURN_MS) { ui.screen = cfg.startScreen; nextDrawMs = 0; }
+  if (ui.screen != homeScreen() && millis() - lastTouchMs > SCREEN_RETURN_MS) { ui.screen = homeScreen(); nextDrawMs = 0; }
+  if (ui.screen == SCREEN_OBS && !cfg.obsEnabled) ui.screen = SCREEN_FORECAST;  // turned off on the settings page
   if (webUpdating()) { delay(10); return; }  // keep the update message on screen
   if ((int32_t)(millis() - nextDrawMs) >= 0) {
     if (!skipAdvance && ui.screen == SCREEN_FORECAST) ui.footerPage = (ui.footerPage + 1) % FOOTER_PAGES;
+    if (!skipAdvance && ui.screen == SCREEN_OBS && obs.nRigs > OBS_RIGS_PER_PAGE) ui.rigPage++;
     skipAdvance = false;
     if (currentBacklight > 0) { uint32_t t0 = millis(); DataGuard g; drawScreen(); perfNote("draw", t0); }  // no point drawing while the screen is off
     nextDrawMs = millis() + (uint32_t)cfg.footerSeconds * 1000;

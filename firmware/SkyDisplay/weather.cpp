@@ -15,7 +15,126 @@ struct PsramAllocator : ArduinoJson::Allocator {
 };
 static PsramAllocator psAlloc;
 
-bool weatherConfigured() { return cfg.wuStation.length() > 0 && cfg.wuKey.length() > 0; }
+bool weatherUsesEcowitt() { return cfg.ecowittHost.length() > 0; }
+bool weatherConfigured() { return weatherUsesEcowitt() || (cfg.wuStation.length() > 0 && cfg.wuKey.length() > 0); }
+bool weatherHasForecast() { return cfg.wuKey.length() > 0; }
+
+// ---------- 24 h trace kept on the device: hourly averages in a ring of 24 slots ----------
+static int slotFor(Weather& w, uint32_t hour) {
+  int s = hour % WX_TRACE;
+  if (w.slotHour[s] != hour) {  // a new hour: start the slot afresh
+    w.slotHour[s] = hour; w.slotT[s] = w.slotD[s] = w.slotP[s] = 0; w.slotNT[s] = w.slotND[s] = w.slotNP[s] = 0;
+  }
+  return s;
+}
+static void addSample(Weather& w, time_t t, float temp, float dew, float pres) {
+  if (t < 1700000000) return;
+  int s = slotFor(w, (uint32_t)(t / 3600));
+  if (!isnan(temp)) { w.slotT[s] += temp; w.slotNT[s]++; }
+  if (!isnan(dew))  { w.slotD[s] += dew;  w.slotND[s]++; }
+  if (!isnan(pres)) { w.slotP[s] += pres; w.slotNP[s]++; }
+}
+static float slotAvg(const Weather& w, uint32_t hour, const float* sum, const uint16_t* n) {
+  int s = hour % WX_TRACE;
+  return (w.slotHour[s] == hour && n[s]) ? sum[s] / n[s] : NAN;
+}
+// Rebuild traceT/traceD (oldest first) and the 1 h / 3 h changes from the slots.
+static void rebuildTrace(Weather& w, time_t now) {
+  uint32_t h = (uint32_t)(now / 3600);
+  bool any = false;
+  for (int i = 0; i < WX_TRACE; i++) {
+    uint32_t hr = h - (WX_TRACE - 1) + i;
+    w.traceT[i] = slotAvg(w, hr, w.slotT, w.slotNT);
+    w.traceD[i] = slotAvg(w, hr, w.slotD, w.slotND);
+    if (!isnan(w.traceT[i])) any = true;
+  }
+  float t1 = slotAvg(w, h - 1, w.slotT, w.slotNT), p3 = slotAvg(w, h - 3, w.slotP, w.slotNP);
+  w.change1h = (!isnan(t1) && !isnan(w.temp)) ? w.temp - t1 : NAN;
+  w.pressure3h = (!isnan(p3) && !isnan(w.pressure)) ? w.pressure - p3 : NAN;
+  w.haveHistory = any;
+}
+
+// ---------- EcoWitt gateway: GET http://<gateway>/get_livedata_info ----------
+// Values are strings with units that follow the gateway's display settings ("18.1" + unit "F", "0.00 mph",
+// "30.22 inHg"), so each is converted to metric from the unit it arrives with.
+static bool numUnit(JsonVariantConst item, const char* key, float& v, String& unit) {
+  String raw = item[key] | "";
+  raw.trim();
+  if (!raw.length() || raw.startsWith("--")) return false;
+  int i = 0;
+  while (i < (int)raw.length() && (isdigit((unsigned char)raw[i]) || raw[i] == '.' || raw[i] == '-' || raw[i] == '+')) i++;
+  if (!i) return false;
+  v = raw.substring(0, i).toFloat();
+  unit = raw.substring(i); unit.trim();
+  if (!unit.length()) unit = item["unit"] | "";
+  unit.replace("\xC2\xB0", ""); unit.toLowerCase();
+  return true;
+}
+static float toC(float v, const String& u) { return (u == "f" || u.endsWith("f")) ? (v - 32) * 5 / 9 : v; }
+static float toKmh(float v, const String& u) {
+  if (u == "mph") return v * 1.609344f;
+  if (u == "m/s") return v * 3.6f;
+  if (u.startsWith("knot") || u == "kn") return v * 1.852f;
+  if (u == "ft/s") return v * 1.09728f;
+  return v;  // km/h
+}
+static float toHpa(float v, const String& u) {
+  if (u == "inhg") return v * 33.8639f;
+  if (u == "kpa") return v * 10;
+  if (u == "mmhg") return v * 1.33322f;
+  return v;  // hPa / mbar
+}
+static float toMm(float v, const String& u) { return u.startsWith("in") ? v * 25.4f : v; }
+
+static bool fetchEcowitt(Weather& w, String host) {
+  if (WiFi.status() != WL_CONNECTED) { w.error = "no Wi-Fi"; return false; }
+  host.trim();
+  if (host.indexOf("://") < 0) host = "http://" + host;
+  while (host.endsWith("/")) host.remove(host.length() - 1);
+  WiFiClient client;
+  HTTPClient http;
+  http.setConnectTimeout(2000);
+  http.setTimeout(4000);
+  if (!http.begin(client, host + "/get_livedata_info")) { w.error = "EcoWitt: bad address"; return false; }
+  int code = http.GET();
+  if (code != 200) { http.end(); w.error = code > 0 ? "EcoWitt: HTTP " + String(code) : String("EcoWitt: no answer"); return false; }
+  String body = http.getString();
+  http.end();
+  JsonDocument doc;
+  if (deserializeJson(doc, body)) { w.error = "EcoWitt: unexpected response"; return false; }
+  JsonArrayConst common = doc["common_list"];
+  if (common.isNull()) { w.error = "EcoWitt: no live data"; return false; }
+  float temp = NAN, feels = NAN, dew = NAN, wind = NAN, gust = NAN, pres = NAN, rain = NAN; int hum = -1, dir = -1;
+  for (JsonVariantConst it : common) {
+    String id = it["id"] | ""; id.toLowerCase();
+    float v; String u;
+    if (!numUnit(it, "val", v, u)) continue;
+    if (id == "0x02") temp = toC(v, u);
+    else if (id == "3") feels = toC(v, u);
+    else if (id == "0x03") dew = toC(v, u);
+    else if (id == "0x07") hum = (int)lroundf(v);
+    else if (id == "0x0b") wind = toKmh(v, u);
+    else if (id == "0x0c") gust = toKmh(v, u);
+    else if (id == "0x0a") dir = ((int)lroundf(v)) % 360;
+  }
+  for (const char* list : {"rain", "piezoRain"}) {  // tipping bucket first, then a piezo gauge (WS90)
+    if (!isnan(rain)) break;
+    for (JsonVariantConst it : doc[list].as<JsonArrayConst>()) {
+      String id = it["id"] | ""; id.toLowerCase();
+      float v; String u;
+      if (id == "0x10" && numUnit(it, "val", v, u)) { rain = toMm(v, u); break; }  // rain today
+    }
+  }
+  { float v; String u; JsonVariantConst wh = doc["wh25"][0]; if (numUnit(wh, "rel", v, u)) pres = toHpa(v, u); }
+  if (isnan(temp)) { w.error = "EcoWitt: no outdoor temperature"; return false; }
+  w.temp = temp; w.dew = dew; w.humidity = hum; w.wind = wind; w.gust = gust; w.windDir = dir;
+  w.pressure = pres; w.rainToday = rain;
+  w.feels = isnan(feels) ? temp : feels;
+  w.obsUtc = time(nullptr);
+  w.haveCurrent = true;
+  w.source = "EcoWitt";
+  return true;
+}
 
 // A Stream that collects whatever is written to it in a growing PSRAM buffer.
 struct PsramSink : Stream {
@@ -102,6 +221,7 @@ static bool fetchCurrent(Weather& w) {
   float wc = f(mt["windChill"]), hi = f(mt["heatIndex"]);
   w.feels = (!isnan(wc) && wc < w.temp) ? wc : (!isnan(hi) && hi > w.temp) ? hi : w.temp;
   w.haveCurrent = true;
+  w.source = gStation;
   logf("[wx] current: %.1f C, dew %.1f, %d%%, wind %.0f gust %.0f, %.1f hPa\n", w.temp, w.dew, w.humidity, w.wind, w.gust, w.pressure);
   return true;
 }
@@ -120,29 +240,24 @@ static bool fetchHistory(Weather& w) {
   JsonArrayConst obs = doc["observations"];
   if (obs.isNull() || obs.size() == 0) { w.error = "history: empty response"; return false; }
 
+  // Seed the on-device trace with the hourly rows of the last 24 hours (only hours the device hasn't
+  // filled itself; the current hour is left to the live readings).
   time_t now = time(nullptr);
-  float sumT[WX_TRACE] = {0}, sumD[WX_TRACE] = {0}; int nT[WX_TRACE] = {0}, nD[WX_TRACE] = {0};
-  float t1h = NAN, p3h = NAN; long best1h = LONG_MAX, best3h = LONG_MAX;
+  uint32_t thisHour = (uint32_t)(now / 3600);
+  int seeded = 0;
   for (JsonVariantConst ob : obs) {
     time_t ep = ob["epoch"] | 0; if (!ep) continue;
     long age = (long)(now - ep);
     if (age < 0 || age >= 24L * 3600) continue;
-    int slot = WX_TRACE - 1 - (int)(age / 3600);  // hourly buckets, newest last
-    float t = f(ob["metric"]["tempAvg"]), d = f(ob["metric"]["dewptAvg"]), p = f(ob["metric"]["pressureMax"]);
-    if (!isnan(t)) { sumT[slot] += t; nT[slot]++; }
-    if (!isnan(d)) { sumD[slot] += d; nD[slot]++; }
-    if (!isnan(t) && labs(age - 3600) < best1h) { best1h = labs(age - 3600); t1h = t; }
-    if (!isnan(p) && labs(age - 3 * 3600) < best3h) { best3h = labs(age - 3 * 3600); p3h = p; }
+    uint32_t hr = (uint32_t)(ep / 3600);
+    if (hr >= thisHour) continue;
+    int s = hr % WX_TRACE;
+    if (w.slotHour[s] == hr && w.slotNT[s]) continue;
+    addSample(w, ep, f(ob["metric"]["tempAvg"]), f(ob["metric"]["dewptAvg"]), f(ob["metric"]["pressureMax"]));
+    seeded++;
   }
-  for (int i = 0; i < WX_TRACE; i++) {
-    w.traceT[i] = nT[i] ? sumT[i] / nT[i] : NAN;
-    w.traceD[i] = nD[i] ? sumD[i] / nD[i] : NAN;
-  }
-  // Hourly rows are averages, so allow up to 40 / 50 minutes either side of the target time.
-  w.change1h = (best1h < 40 * 60 && !isnan(w.temp)) ? w.temp - t1h : NAN;
-  w.pressure3h = (best3h < 50 * 60 && !isnan(w.pressure)) ? w.pressure - p3h : NAN;
-  w.haveHistory = true;
-  logf("[wx] history: %u observations, 1 h change %.1f, 3 h pressure %.1f\n", (unsigned)obs.size(), w.change1h, w.pressure3h);
+  rebuildTrace(w, now);
+  logf("[wx] history: seeded %d hours of the trace\n", seeded);
   return true;
 }
 
@@ -194,10 +309,21 @@ static bool fetchForecast(Weather& w, double lat, double lon) {
   return true;
 }
 
-bool weatherFetch(WxPart part, Weather& w, const String& station, const String& key, double lat, double lon) {
-  if (!station.length() || !key.length()) { w.error = "not set up"; return false; }
-  gStation = station; gKey = key;
-  bool ok = part == WX_CURRENT ? fetchCurrent(w) : part == WX_HISTORY ? fetchHistory(w) : fetchForecast(w, lat, lon);
+bool weatherFetch(WxPart part, Weather& w, const WxSetup& s) {
+  gStation = s.station; gKey = s.key;
+  bool ok;
+  if (part == WX_CURRENT) {
+    if (s.ecowitt.length()) ok = fetchEcowitt(w, s.ecowitt);
+    else if (s.station.length() && s.key.length()) ok = fetchCurrent(w);
+    else { w.error = "not set up"; return false; }
+    if (ok) { addSample(w, w.obsUtc, w.temp, w.dew, w.pressure); rebuildTrace(w, w.obsUtc); }
+  } else if (!s.key.length() || (part == WX_HISTORY && !s.station.length())) { return false; }  // nothing to do
+  else ok = part == WX_HISTORY ? fetchHistory(w) : fetchForecast(w, s.lat, s.lon);
+  if (part != WX_CURRENT) {  // WU forecast / history: their own error, so EcoWitt successes don't hide it
+    if (ok) w.wuError = "";
+    else { w.wuError = w.error; w.error = ""; logf("[wx] %s\n", w.wuError.c_str()); return false; }
+    return true;
+  }
   if (ok) w.error = "";
   else logf("[wx] %s\n", w.error.c_str());
   return ok;

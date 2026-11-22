@@ -2,6 +2,7 @@
 #include "forecast.h"
 #include "astro.h"
 #include "weather.h"
+#include "obs.h"
 
 struct UiState {
   const Forecast* f = nullptr;
@@ -14,12 +15,15 @@ struct UiState {
   int screen = 0;           // Screen enum below; 0 = forecast
   bool needsSetup = false;  // no chart configured yet: forecast screen shows the first-run QR code
   String settingsUrl;       // e.g. http://192.168.1.50/ (the display's address)
+  int dotIndex = 0, dotCount = 3;  // header dots: position of this screen in the swipe order
+  int rigPage = 0;          // observatory screen: which two rigs are shown
 };
 
 static const int FOOTER_PAGES = 3;
 
-// Screens, in swipe order.
-enum Screen { SCREEN_FORECAST = 0, SCREEN_WEATHER = 1, SCREEN_STATUS = 2, SCREEN_COUNT = 3 };
+// Screens. Swipe order is forecast, weather, observatory (when turned on), status.
+enum Screen { SCREEN_FORECAST = 0, SCREEN_WEATHER = 1, SCREEN_STATUS = 2, SCREEN_OBS = 3, SCREEN_COUNT = 4 };
+static const int OBS_RIGS_PER_PAGE = 2;
 
 // Status screen content, filled in by the main sketch.
 struct StatusItem { String label, value; bool warn = false; };
@@ -35,6 +39,8 @@ void uiDraw(const UiState& s);                           // forecast screen
 void uiDrawStatus(const UiState& s, const StatusInfo& st); // status screen
 // Weather screen. settingsUrl is shown when the station or key isn't set up yet.
 void uiDrawWeather(const UiState& s, const Weather& w, bool configured, const String& settingsUrl);
+// Observatory screen.
+void uiDrawObservatory(const UiState& s, const Observatory& o, const String& settingsUrl);
 // Wi-Fi setup: QR code to join the setup network (open, no password) and QR code for the setup page.
 void uiWifiSetupScreen(const char* apName, const String& setupUrl);
 // First run after Wi-Fi: QR code for the settings page, to add the chart and time zone.

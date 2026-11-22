@@ -37,12 +37,23 @@ void settingsLoad() {
   cfg.nightFrom     = prefs.getInt("nightFrom", d.nightFrom);
   cfg.nightTo       = prefs.getInt("nightTo", d.nightTo);
   cfg.footerSeconds = prefs.getInt("footSec", d.footerSeconds);
-  cfg.startScreen = constrain(prefs.getInt("startScr", d.startScreen), 0, 2);
+  cfg.startScreen = constrain(prefs.getInt("startScr", d.startScreen), 0, 3);
   cfg.goodMaxCloud  = prefs.getInt("goodCloud", d.goodMaxCloud);
   cfg.goodMinTrans  = prefs.getInt("goodTrans", d.goodMinTrans);
   cfg.goMinHours    = prefs.getInt("goHours", d.goMinHours);
   cfg.wuStation     = prefs.getString("wuStation", d.wuStation);
   cfg.wuKey         = prefs.getString("wuKey", d.wuKey);
+  cfg.ecowittHost   = prefs.getString("ecowitt", d.ecowittHost);
+  cfg.obsEnabled    = prefs.getBool("oEn", d.obsEnabled);
+  cfg.obsRoof       = prefs.getString("oRoof", d.obsRoof);
+  cfg.obsSafety     = prefs.getString("oSafe", d.obsSafety);
+  cfg.obsRain       = prefs.getString("oRain", d.obsRain);
+  cfg.obsSky        = prefs.getString("oSky", d.obsSky);
+  cfg.obsHoldHour   = prefs.getInt("oHold", d.obsHoldHour);
+  for (int i = 0; i < Settings::MAX_RIGS; i++) {
+    cfg.rigName[i] = prefs.getString(("rN" + String(i)).c_str(), "");
+    cfg.rigHost[i] = prefs.getString(("rH" + String(i)).c_str(), "");
+  }
   cfg.hostname      = prefs.getString("host", d.hostname);
   cfg.webPassword   = prefs.getString("webPass", d.webPassword);
   prefs.end();
@@ -72,6 +83,17 @@ void settingsSave() {
   prefs.putInt("goHours", cfg.goMinHours);
   prefs.putString("wuStation", cfg.wuStation);
   prefs.putString("wuKey", cfg.wuKey);
+  prefs.putString("ecowitt", cfg.ecowittHost);
+  prefs.putBool("oEn", cfg.obsEnabled);
+  prefs.putString("oRoof", cfg.obsRoof);
+  prefs.putString("oSafe", cfg.obsSafety);
+  prefs.putString("oRain", cfg.obsRain);
+  prefs.putString("oSky", cfg.obsSky);
+  prefs.putInt("oHold", cfg.obsHoldHour);
+  for (int i = 0; i < Settings::MAX_RIGS; i++) {
+    prefs.putString(("rN" + String(i)).c_str(), cfg.rigName[i]);
+    prefs.putString(("rH" + String(i)).c_str(), cfg.rigHost[i]);
+  }
   prefs.putString("host", cfg.hostname);
   prefs.putString("webPass", cfg.webPassword);
   prefs.end();

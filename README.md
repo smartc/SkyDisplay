@@ -15,6 +15,10 @@ It answers one question at a glance: is tonight, or tomorrow night, worth settin
   tonight's cloud cover, and a strip with today's daytime forecast (until mid-afternoon), tonight and the next four
   days (day high and low, night-time cloud and chance of precipitation), from a Weather Underground personal weather
   station. The square Indicator screen also shows the text forecast for today (or tonight, later in the day).
+- **Observatory** (optional): roll-off roof state, safety verdict with its reason, rain sensor, cloud cover, SQM, sky
+  brightness and sky temperature, mount park sensors, and each imaging rig's state from NINA (imaging, waiting,
+  finished, lost, inactive). With more than two rigs the list pages, like the footer. See
+  `mockup/observatory-screen.html`.
 - **Status:** Wi-Fi, IP address, chart, clock sync and weather status, and a QR code for the settings page.
 
 Swipe between screens, tap to rotate the footer, long-press to dim. When the screen is dimmed, the first tap wakes it.
@@ -29,7 +33,19 @@ footer fits on screen at once, so it doesn't rotate.
   Only Dark Dragons chart pages (`https://cds.darkdragonsastro.com/g/<chart id>.html`) are supported; the classic
   cleardarksky.com charts use a different layout.
   Please be considerate with polling (default every 30 minutes) and ask the site's maintainers before using it.
-- **Weather Underground PWS API**: needs your own station ID and API key, entered on the settings page.
+- **Current weather** from an **EcoWitt gateway** on your network (GW1100, GW2000, GW3000; its local
+  `get_livedata_info` API, no account or calls), or from a **Weather Underground** personal weather station.
+- **Forecast** from the **Weather Underground** API: needs your own API key, entered on the settings page. With an
+  EcoWitt gateway a display uses about 24 calls a day; without one, about 170 (the free limit is 1,500 per key).
+  The 24-hour temperature trace is built on the device.
+- **Observatory**, all optional and set on the settings page:
+  - ASCOM Alpaca devices: a Dome for the roof, a SafetyMonitor for the safety verdict (Llama Watch's unsafe
+    reasons are shown when present), a SafetyMonitor or a UDP safety broadcast for rain, and ObservingConditions for
+    the sky. A Find Alpaca devices button runs Alpaca discovery.
+  - Mount park sensors and safety sensors that broadcast the Dark Dragons park-sensor JSON on UDP port 23435 are
+    picked up automatically.
+  - Imaging rigs through N.I.N.A.'s Advanced API plugin (port 1888). NINA only runs while imaging, so a rig that
+    doesn't answer is shown as inactive; a finished or lost run stays on screen until a set hour.
 - **Sun and moon** times are computed on the device.
 
 ## Hardware

@@ -1,0 +1,289 @@
+<title>Observatory Screen</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: the two device screens side by side (stacked on phones), scenario switcher above, then a short
+   data-sources and settings card. Single dark look on purpose, like the other SkyDisplay mockups (night instrument). */
+:root{
+  --bg:#070a12; --panel:#0e1320; --line:#1f2840; --fg:#dfe6f2; --muted:#8a96ad; --accent:#6fb6ff;
+  --go:#3ddc84; --maybe:#ffb43d; --no:#ff5a5a;
+  --f-display:"Space Grotesk",system-ui,sans-serif; --f-body:"Inter",system-ui,sans-serif;
+  --f-screen:"Barlow Semi Condensed","Arial Narrow",sans-serif;
+  color-scheme:dark;
+}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+.wrap{max-width:1060px;margin:0 auto;display:grid;gap:24px}
+h1{font-family:var(--f-display);font-weight:600;font-size:1.7rem;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-family:var(--f-display);font-weight:600;font-size:1.1rem;margin:0 0 10px;text-wrap:balance}
+.lede{color:var(--muted);margin:6px 0 0;max-width:68ch}
+.scen{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.scen span{color:var(--muted);font-size:.85rem;margin-right:4px}
+.scen button{font:inherit;font-size:.85rem;background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:5px 14px;cursor:pointer}
+.scen button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#04101f;font-weight:600}
+.scen button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.devices{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;align-items:start}
+figure{margin:0;display:grid;gap:8px;min-width:0}
+figcaption{color:var(--muted);font-size:.82rem;text-align:center}
+.bezel{background:#000;border:10px solid #15181f;border-radius:14px;box-shadow:0 30px 50px -30px #000}
+canvas{display:block;width:100%;height:auto;border-radius:2px;cursor:pointer}
+#rignote{flex-basis:100%;margin:2px 0 0}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;min-width:0}
+.card p,.card li{color:#c3cbe0;font-size:.9rem;margin:0}
+.card ul{margin:0;padding-left:18px;display:grid;gap:6px}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.85rem}
+td,th{text-align:left;padding:5px 10px 5px 0;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500;white-space:nowrap}
+code{font-size:.85em;color:var(--fg)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<div class="wrap">
+  <header>
+    <h1>Observatory screen</h1>
+    <p class="lede">A fourth SkyDisplay screen: roof, safety, sky conditions, mount park sensors and each rig's imaging state at a glance. Sample data, drawn at the real screen sizes with the device's fonts and colours.</p>
+  </header>
+
+  <div class="scen" role="group" aria-label="Scenario">
+    <span>Scenario</span>
+    <button type="button" id="sc-imaging" data-s="imaging" aria-pressed="true">Imaging night</button>
+    <button type="button" id="sc-rain" data-s="rain">Rain: closing up</button>
+    <button type="button" id="sc-morning" data-s="morning">Morning after</button>
+    <button type="button" id="sc-day" data-s="day">Daytime, closed</button>
+    <button type="button" id="sc-wind" data-s="wind">Unsafe while dry</button>
+    <button type="button" id="sc-offline" data-s="offline">Sensors offline</button>
+    <button type="button" id="sc-fault" data-s="fault">Roof fault</button>
+  </div>
+  <div class="scen" role="group" aria-label="Rigs configured">
+    <span>Rigs configured</span>
+    <button type="button" id="rc-2" data-r="2" aria-pressed="true">2</button>
+    <button type="button" id="rc-3" data-r="3">3</button>
+    <span id="rignote">With more than two rigs the list shows two at a time, turns the page every 5 s, and a tap on the screen turns it now.</span>
+  </div>
+
+  <div class="devices">
+    <figure><div class="bezel"><canvas id="sq" width="960" height="960" role="img" aria-label="SenseCAP Indicator, 480 by 480"></canvas></div>
+      <figcaption>SenseCAP Indicator, 480 × 480</figcaption></figure>
+    <figure><div class="bezel"><canvas id="wd" width="960" height="640" role="img" aria-label="WT32-SC01 Plus, 480 by 320"></canvas></div>
+      <figcaption>WT32-SC01 Plus, 480 × 320</figcaption></figure>
+  </div>
+
+  <div class="cols">
+    <section class="card">
+      <h2>Where the data comes from</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Shown</th><th>Source</th></tr>
+        <tr><td>Roof</td><td>Alpaca <b>Dome</b>: <code>shutterstatus</code>, <code>atpark</code>; error text from the device</td></tr>
+        <tr><td>Safety</td><td>One Alpaca <b>SafetyMonitor</b> gives the verdict (here Llama Watch). When it says unsafe, Llama Watch also sends <code>Comments.UnsafeMonitors</code> (monitor, reason, value, threshold); the first one is shown as the reason</td></tr>
+        <tr><td>Rain</td><td>Wet or dry from the rain sensor itself: its own SafetyMonitor, or its UDP safety broadcast. Shown separately, since the verdict can be unsafe for other reasons</td></tr>
+        <tr><td>Cloud, SQM, lux, sky temp</td><td>Alpaca <b>ObservingConditions</b>: <code>cloudcover</code>, <code>skyquality</code>, <code>skybrightness</code>, <code>skytemperature</code></td></tr>
+        <tr><td>Park sensors</td><td>UDP broadcast (Dark Dragons park-sensor JSON, port 23435), found automatically; or Alpaca SafetyMonitor per sensor</td></tr>
+        <tr><td>Rigs</td><td>NINA Advanced API on each rig (sequence, target, frame count, guiding, HFR); mount from Alpaca <b>Telescope</b> if there's no NINA. The display remembers each rig's last state, so it can show Finished or Lost after NINA has gone away</td></tr>
+      </table></div>
+    </section>
+    <section class="card">
+      <h2>Settings, as on CloudRoll</h2>
+      <ul>
+        <li><b>Find Alpaca devices</b> button: discovery on UDP 32227 lists every device on the network; tick the ones to show and give each a short name.</li>
+        <li>Each device entry: host, port, type, device number, label. Pick one SafetyMonitor as the safety verdict and, optionally, one rain sensor for wet or dry.</li>
+        <li>Park and safety sensors on the UDP broadcast appear by themselves; rename or hide them.</li>
+        <li>Rigs: name plus NINA host and port (Advanced API plugin, default 1888). Optional Alpaca Telescope per rig. More than two rigs page two at a time, like the WT32's footer.</li>
+        <li>NINA only runs while imaging, so a rig that doesn't answer is <b>Inactive</b> (grey), not an error. After a run, its final state stays on screen as <b>Finished</b> until a set time (default 12:00), then goes back to Inactive. If NINA stops answering in the middle of a sequence, the rig shows as <b>Lost</b> (red) until that same time.</li>
+        <li>Poll every 15 s while the screen is shown, every 60 s otherwise; anything not heard from in 3 polls shows as offline.</li>
+      </ul>
+    </section>
+  </div>
+</div>
+<script>
+(() => {
+const C = {bg:"#04060b", tile:"#0c111c", line:"#1b2337", fg:"#e6ecf7", muted:"#9aa6bd", idle:"#5b6577",
+  go:"#3ddc84", maybe:"#ffb43d", no:"#ff5a5a", blue:"#6fb6ff", track:"#1a2234"};
+const FONT = () => getComputedStyle(document.documentElement).getPropertyValue("--f-screen");
+
+// ---- sample scenarios ----
+const S = {
+  imaging: {time:"SAT 21 NOV   23:14",
+    roof:{word:"OPEN", col:C.go, sub:"Open since 20:41", icon:"open"},
+    safe:{word:"SAFE", col:C.go, rain:"dry"},
+    sky:{cloud:6, sqm:"20.86", lux:"0.0012", skyT:"−31.4°", ambient:"−6.2°"},
+    park:[["East pier","UNPARKED"],["West pier","UNPARKED"],["North pier","UNPARKED"]],
+    rigs:[
+      {name:"East pier", state:"IMAGING", col:C.go, l1:"NGC 7000  ·  Ha  ·  300 s", l2:"Frame 23 of 60", prog:23/60, rms:"0.58″", hfr:"2.14", last:"1 min"},
+      {name:"West pier", state:"IMAGING", col:C.go, l1:"M33  ·  L  ·  180 s", l2:"Frame 41 of 90", prog:41/90, rms:"0.71″", hfr:"2.38", last:"2 min"}, {name:"North pier", state:"IMAGING", col:C.go, l1:"IC 1396  ·  OIII  ·  600 s", l2:"Frame 7 of 24", prog:7/24, rms:"0.64″", hfr:"2.51", last:"4 min"}]},
+  rain: {time:"SUN 22 NOV   01:37",
+    roof:{word:"CLOSING", col:C.maybe, sub:"Started 01:36", icon:"moving"},
+    safe:{word:"UNSAFE", col:C.no, rain:"WET", reason:"Rain Safety Sensor (RG9): wet"},
+    sky:{cloud:88, sqm:"18.92", lux:"0.0094", skyT:"−9.8°", ambient:"−4.9°"},
+    park:[["East pier","PARKED"],["West pier","PARKED"],["North pier","PARKED"]],
+    rigs:[
+      {name:"East pier", state:"PARKED", col:C.maybe, l1:"NGC 7000  ·  Ha  ·  stopped", l2:"Safety: parked 01:35", prog:37/60, rms:"–", hfr:"–", last:"3 min"},
+      {name:"West pier", state:"PARKED", col:C.maybe, l1:"M33  ·  L  ·  stopped", l2:"Safety: parked 01:35", prog:66/90, rms:"–", hfr:"–", last:"3 min"}, {name:"North pier", state:"PARKED", col:C.maybe, l1:"IC 1396  ·  OIII  ·  stopped", l2:"Safety: parked 01:35", prog:11/24, rms:"–", hfr:"–", last:"5 min"}]},
+  morning: {time:"SUN 22 NOV   08:40",
+    roof:{word:"CLOSED", col:C.muted, sub:"Closed since 06:31", icon:"closed"},
+    safe:{word:"SAFE", col:C.go, rain:"dry"},
+    sky:{cloud:22, sqm:"–", lux:"9 200", skyT:"−24.8°", ambient:"−8.3°"},
+    park:[["East pier","PARKED"],["West pier","UNPARKED"],["North pier","PARKED"]],
+    rigs:[
+      {name:"East pier", state:"FINISHED", col:C.go, l1:"NGC 7000  ·  Ha  ·  60 of 60", l2:"Finished 05:58, mount parked", prog:0, rms:"0.61″", hfr:"2.17", last:"–", l3:""},
+      {name:"West pier", state:"LOST", col:C.no, l1:"M33  ·  L  ·  frame 52 of 90", l2:"NINA stopped answering at 03:12", prog:0, rms:"0.74″", hfr:"2.40", last:"–", l3:""},
+      {name:"North pier", state:"FINISHED", col:C.go, l1:"IC 1396  ·  OIII  ·  24 of 24", l2:"Finished 05:41, mount parked", prog:0, rms:"0.66″", hfr:"2.55", last:"–", l3:""}]},
+  day: {time:"SAT 21 NOV   14:05",
+    roof:{word:"CLOSED", col:C.muted, sub:"Closed since 06:52", icon:"closed"},
+    safe:{word:"SAFE", col:C.go, rain:"dry"},
+    sky:{cloud:64, sqm:"–", lux:"18 400", skyT:"−12.1°", ambient:"−3.0°"},
+    park:[["East pier","PARKED"],["West pier","PARKED"],["North pier","PARKED"]],
+    rigs:[
+      {name:"East pier", state:"INACTIVE", col:C.idle, prog:0, rms:"–", hfr:"–", last:"–", l1:"Not running", l2:"Last run: Fri night, NGC 7000, 60 frames", l3:"NINA offline since 06:14"},
+      {name:"West pier", state:"INACTIVE", col:C.idle, prog:0, rms:"–", hfr:"–", last:"–", l1:"Not running", l2:"Last run: Fri night, M33, 90 frames", l3:"NINA offline since 06:20"},
+      {name:"North pier", state:"INACTIVE", col:C.idle, prog:0, rms:"–", hfr:"–", last:"–", l1:"Not running", l2:"Last run: Thu night, IC 1396, 24 frames", l3:"NINA offline since Fri 05:51"}]},
+  wind: {time:"SUN 22 NOV   00:12",
+    roof:{word:"CLOSING", col:C.maybe, sub:"Started 00:11", icon:"moving"},
+    safe:{word:"UNSAFE", col:C.no, rain:"dry", reason:"Wind gust: 52 km/h, limit 40"},
+    sky:{cloud:9, sqm:"20.74", lux:"0.0015", skyT:"−30.2°", ambient:"−4.1°"},
+    park:[["East pier","PARKED"],["West pier","PARKED"],["North pier","PARKED"]],
+    rigs:[
+      {name:"East pier", state:"PARKED", col:C.maybe, l1:"NGC 7000  ·  Ha  ·  stopped", l2:"Safety: parked 00:10", prog:31/60, rms:"–", hfr:"–", last:"2 min"},
+      {name:"West pier", state:"PARKED", col:C.maybe, l1:"M33  ·  L  ·  stopped", l2:"Safety: parked 00:10", prog:58/90, rms:"–", hfr:"–", last:"2 min"},
+      {name:"North pier", state:"PARKED", col:C.maybe, l1:"IC 1396  ·  OIII  ·  stopped", l2:"Safety: parked 00:10", prog:9/24, rms:"–", hfr:"–", last:"6 min"}]},
+  offline: {time:"SAT 21 NOV   16:06",
+    roof:{word:"CLOSED", col:C.muted, sub:"Closed since 06:48", icon:"closed"},
+    safe:{word:"UNSAFE", col:C.no, rain:"no data", reason:"Rain/Snow Safety Monitor: no data for 3 days"},
+    sky:{cloud:"–", sqm:"–", lux:"–", skyT:"–", ambient:"–"},
+    park:[["East pier","OFFLINE"],["West pier","OFFLINE"],["North pier","OFFLINE"]],
+    rigs:[
+      {name:"East pier", state:"INACTIVE", col:C.idle, prog:0, rms:"–", hfr:"–", last:"–", l1:"Not running", l2:"Last run: Tue night, NGC 7000, 41 frames", l3:"NINA offline since Wed 07:02"},
+      {name:"West pier", state:"INACTIVE", col:C.idle, prog:0, rms:"–", hfr:"–", last:"–", l1:"Not running", l2:"Last run: Tue night, M33, 66 frames", l3:"NINA offline since Wed 07:02"},
+      {name:"North pier", state:"INACTIVE", col:C.idle, prog:0, rms:"–", hfr:"–", last:"–", l1:"Not running", l2:"Last run: Tue night, IC 1396, 12 frames", l3:"NINA offline since Wed 07:02"}]},
+  fault: {time:"SAT 21 NOV   20:03",
+    roof:{word:"ERROR", col:C.no, sub:"Neither limit switch", icon:"fault"},
+    safe:{word:"SAFE", col:C.go, rain:"dry"},
+    sky:{cloud:11, sqm:"20.41", lux:"0.0031", skyT:"−28.7°", ambient:"−5.5°"},
+    park:[["East pier","PARKED"],["West pier","UNPARKED"],["North pier","PARKED"]],
+    rigs:[
+      {name:"East pier", state:"WAITING", col:C.maybe, l1:"Waiting for roof", l2:"NGC 7000 starts when open", prog:0, rms:"–", hfr:"–", last:"–"},
+      {name:"West pier", state:"ERROR", col:C.no, l1:"Mount unparked, roof closed", l2:"Check before opening", prog:0, rms:"–", hfr:"–", last:"–"}, {name:"North pier", state:"WAITING", col:C.maybe, l1:"Waiting for roof", l2:"IC 1396 starts when open", prog:0, rms:"–", hfr:"–", last:"–"}]}
+};
+
+// ---- drawing helpers (device coordinates) ----
+function mk(cv, W, H){ const g = cv.getContext("2d"); g.setTransform(cv.width/W,0,0,cv.height/H,0,0); return g; }
+function text(g,s,x,y,size,col,weight=600,align="left",maxW){ g.font=`${weight} ${size}px ${FONT()}`; g.fillStyle=col; g.textAlign=align; g.textBaseline="alphabetic";
+  if(maxW && g.measureText(s).width>maxW){ while(s.length>1 && g.measureText(s+"..").width>maxW) s=s.slice(0,-1); s+=".."; }
+  g.fillText(s,x,y); }
+// Largest size from maxSize down to minSize at which s fits maxW; text() shortens it only below minSize.
+function fitText(g,s,x,y,maxSize,minSize,col,weight,maxW){ let size=maxSize;
+  for(; size>minSize; size--){ g.font=`${weight} ${size}px ${FONT()}`; if(g.measureText(s).width<=maxW) break; }
+  text(g,s,x,y,size,col,weight,"left",maxW); }
+function card(g,x,y,w,h,bg=C.tile){ g.fillStyle=bg; g.beginPath(); g.roundRect(x,y,w,h,10); g.fill(); g.strokeStyle=C.line; g.lineWidth=1; g.stroke(); }
+function dot(g,x,y,r,col,glow){ if(glow){ const gr=g.createRadialGradient(x,y,1,x,y,r*2.3); gr.addColorStop(0,col+"aa"); gr.addColorStop(1,col+"00"); g.fillStyle=gr; g.beginPath(); g.arc(x,y,r*2.3,0,7); g.fill(); }
+  g.fillStyle=col; g.beginPath(); g.arc(x,y,r,0,7); g.fill(); }
+function pill(g,x,y,label,col,size=13){ g.font=`700 ${size}px ${FONT()}`; const w=g.measureText(label).width+14, h=size+7;
+  g.fillStyle=col+"26"; g.beginPath(); g.roundRect(x,y,w,h,h/2); g.fill(); g.strokeStyle=col+"88"; g.lineWidth=1; g.stroke();
+  text(g,label,x+7,y+size+1,size,col,700); return w; }
+function roofIcon(g,x,y,s,kind,col){ // small building with a roll-off roof
+  g.save(); g.translate(x,y); g.scale(s,s);
+  g.fillStyle="#2a3245"; g.fillRect(0,14,36,18);                  // walls
+  const off = kind==="open" ? 18 : kind==="moving" ? 9 : 0;
+  g.fillStyle="#3a4358"; g.fillRect(36,14,18,2);                 // rails the roof rolls onto
+  g.fillStyle=col; g.beginPath(); g.moveTo(-2+off,15); g.lineTo(18+off,5); g.lineTo(38+off,15); g.closePath(); g.fill();
+  if(kind==="fault"){ g.fillStyle=C.no; g.font=`700 15px ${FONT()}`; g.textAlign="center"; g.fillText("!",18,29); }
+  g.restore(); }
+function header(g,W,sc,screen=2,count=4){
+  text(g,sc.time,12,22,21,C.fg,600);
+  for(let k=0;k<count;k++){ const x=W/2+16+(k-(count-1)/2)*14; dot(g,x,15,k===screen?4:3,k===screen?C.fg:C.idle); }
+  text(g,"Observatory",W-12,21,18,C.muted,500,"right"); }
+function bar(g,x,y,w,h,frac,col){ g.fillStyle=C.track; g.beginPath(); g.roundRect(x,y,w,h,h/2); g.fill();
+  if(frac>0){ g.fillStyle=col; g.beginPath(); g.roundRect(x,y,Math.max(h,w*frac),h,h/2); g.fill(); } }
+const parkCol = s => s==="PARKED" ? C.go : s==="UNPARKED" ? C.blue : C.no;
+const cloudCol = c => c<=30 ? C.go : c<=60 ? C.maybe : C.no;
+
+// ---- 480 x 480 ----
+function drawSquare(sc){
+  const cv=document.getElementById("sq"), g=mk(cv,480,480), W=480;
+  g.fillStyle=C.bg; g.fillRect(0,0,480,480); header(g,W,sc);
+  // roof + safety
+  card(g,12,32,224,104);
+  text(g,"ROOF",24,52,14,C.muted);
+  fitText(g,sc.roof.word,24,92,36,24,sc.roof.col,700,134);
+  text(g,sc.roof.sub,24,122,17,C.muted,500,"left",190);
+  roofIcon(g,164,52,1.1,sc.roof.icon,sc.roof.col);
+  card(g,244,32,224,104);
+  text(g,"SAFETY",256,52,14,C.muted);
+  dot(g,268,79,9,sc.safe.col,true);
+  text(g,sc.safe.word,286,92,36,sc.safe.col,700,"left",170);
+  const rainTxt = "Rain sensor: " + sc.safe.rain, rainCol = sc.safe.rain==="WET" ? C.no : sc.safe.rain==="dry" ? C.muted : C.maybe;
+  if(sc.safe.reason){ text(g,rainTxt,256,113,15,rainCol,500,"left",200); text(g,sc.safe.reason,256,130,15,C.no,600,"left",204); }
+  else text(g,rainTxt,256,122,17,rainCol,500,"left",200);
+  // sky
+  card(g,12,144,456,78);
+  text(g,"CLOUD COVER",24,164,14,C.muted);
+  const cl = sc.sky.cloud==="–" ? null : sc.sky.cloud;
+  text(g,cl===null ? "–" : cl+"%",24,200,32,cl===null ? C.idle : cloudCol(cl),700);
+  bar(g,96,186,110,9,cl===null ? 0 : cl/100,cl===null ? C.idle : cloudCol(cl));
+  const cols=[["SQM",sc.sky.sqm,"mag/arcsec²"],["BRIGHTNESS",sc.sky.lux,"lux"],["SKY TEMP",sc.sky.skyT,"air "+sc.sky.ambient]];
+  cols.forEach(([l,v,u],k)=>{ const x=226+k*82; text(g,l,x,164,14,C.muted); text(g,v,x,192,22,v==="–"?C.idle:C.fg,600,"left",80); text(g,u.endsWith("–")?"":u,x,211,13,C.idle,500,"left",80); });
+  // park sensors
+  text(g,"MOUNT PARK SENSORS",12,244,14,C.muted);
+  let px=12; parks(sc).forEach(([n,s])=>{ text(g,n,px,266,16,C.fg,600); g.font=`600 16px ${FONT()}`; px+=g.measureText(n).width+6; px+=pill(g,px,253,s,parkCol(s),11)+14; });
+  // rigs
+  text(g,"RIGS",12,296,14,C.muted); pageDots(g,52,291);
+  shownRigs(sc).forEach((r,k)=>{ const y=304+k*84; card(g,12,y,456,76);
+    dot(g,28,y+19,6,r.col,r.state==="IMAGING");
+    text(g,r.name,42,y+25,20,C.fg,700,"left",110);
+    pill(g,154,y+9,r.state,r.col,12);
+    text(g,r.l1,250,y+24,17,C.fg,600,"left",206);
+    text(g,r.l2,42,y+47,16,C.muted,500,"left",200);
+    if(r.prog>0 && r.prog<1) bar(g,250,y+39,206,7,r.prog,r.col);
+    text(g,r.l3 !== undefined ? r.l3 : (r.last==="–" ? "No images yet tonight" : `Last image ${r.last} ago`),42,y+67,15,C.idle,500,"left",250);
+    if(r.state!=="INACTIVE") text(g,`RMS ${r.rms}   HFR ${r.hfr}`,456,y+67,15,C.muted,500,"right",200); });
+}
+
+// ---- 480 x 320 ----
+function drawWide(sc){
+  const cv=document.getElementById("wd"), g=mk(cv,480,320), W=480;
+  g.fillStyle=C.bg; g.fillRect(0,0,480,320); header(g,W,sc);
+  card(g,12,32,148,70); text(g,"ROOF",22,50,13,C.muted); fitText(g,sc.roof.word,22,84,28,18,sc.roof.col,700,80); roofIcon(g,104,48,0.8,sc.roof.icon,sc.roof.col);
+  card(g,166,32,148,70); text(g,"SAFETY",176,50,13,C.muted); text(g,sc.safe.word,176,84,28,sc.safe.col,700,"left",128);
+  const cl = sc.sky.cloud==="–" ? null : sc.sky.cloud;
+  card(g,320,32,148,70); text(g,"CLOUD",330,50,13,C.muted); text(g,cl===null?"–":cl+"%",330,84,28,cl===null?C.idle:cloudCol(cl),700); bar(g,392,72,64,8,cl===null?0:cl/100,cl===null?C.idle:cloudCol(cl));
+  // one line under the tiles: why it's unsafe, or the sky numbers
+  if(sc.safe.reason) text(g,`Unsafe: ${sc.safe.reason}   ·   rain sensor ${sc.safe.rain}`,12,124,15,C.no,600,"left",456);
+  else text(g,`Rain ${sc.safe.rain}   ·   SQM ${sc.sky.sqm}   ·   ${sc.sky.lux} lux   ·   sky ${sc.sky.skyT}   ·   ${sc.roof.sub}`,12,124,15,C.muted,500,"left",456);
+  // park sensors
+  let px=12; text(g,"PARK",px,150,13,C.muted); px+=40;
+  parks(sc).forEach(([n,s])=>{ dot(g,px+4,145,4,parkCol(s)); text(g,n,px+13,150,15,C.fg,600); g.font=`600 15px ${FONT()}`; px+=g.measureText(n).width+22; });
+  // rigs
+  pageDots(g,452,150);
+  shownRigs(sc).forEach((r,k)=>{ const y=162+k*76; card(g,12,y,456,68);
+    dot(g,26,y+16,5,r.col,r.state==="IMAGING");
+    text(g,r.name,38,y+21,17,C.fg,700,"left",96);
+    pill(g,136,y+7,r.state,r.col,11);
+    text(g,r.l1,226,y+20,15,C.fg,600,"left",232);
+    text(g,r.l2,38,y+38,13,C.muted,500,"left",180);
+    if(r.prog>0 && r.prog<1) bar(g,226,y+30,90,5,r.prog,r.col);
+    if(r.state!=="INACTIVE") text(g,`RMS ${r.rms}  HFR ${r.hfr}`,458,y+38,13,C.muted,500,"right",130);
+    text(g,r.l3 !== undefined ? r.l3 : (r.last==="–" ? "No images yet tonight" : `Last image ${r.last} ago`),38,y+58,13,C.idle,500,"left",260); });
+}
+
+let cur="imaging", rigCount=2, page=0, timer=null;
+const PER_PAGE=2;
+function pages(){ return Math.ceil(rigCount/PER_PAGE); }
+function shownRigs(sc){ return sc.rigs.slice(0,rigCount).slice(page*PER_PAGE, page*PER_PAGE+PER_PAGE); }
+function parks(sc){ return sc.park.slice(0,rigCount); }
+function pageDots(g,x,y){ const n=pages(); if(n<2) return;
+  for(let k=0;k<n;k++) dot(g,x+k*12,y,k===page?3.5:2.5,k===page?C.fg:C.idle); }
+function draw(){ if(page>=pages()) page=0; drawSquare(S[cur]); drawWide(S[cur]); }
+function restartTimer(){ clearInterval(timer); timer=null;
+  if(pages()>1 && !matchMedia("(prefers-reduced-motion: reduce)").matches) timer=setInterval(()=>{ page=(page+1)%pages(); draw(); },5000); }
+function nextPage(){ if(pages()<2) return; page=(page+1)%pages(); draw(); restartTimer(); }
+["sq","wd"].forEach(id=>document.getElementById(id).addEventListener("click",nextPage));
+document.querySelectorAll("[data-r]").forEach(b=>b.addEventListener("click",()=>{
+  rigCount=+b.dataset.r; page=0; document.querySelectorAll("[data-r]").forEach(x=>x.setAttribute("aria-pressed", x===b ? "true":"false")); draw(); restartTimer(); }));
+document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click",()=>{
+  cur=b.dataset.s; document.querySelectorAll("[data-s]").forEach(x=>x.setAttribute("aria-pressed", x===b ? "true":"false")); draw(); }));
+draw();
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(draw);
+})();
+</script>

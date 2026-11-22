@@ -2,7 +2,8 @@
 #include <Arduino.h>
 #include <time.h>
 
-// Weather Underground personal weather station data (metric units).
+// Weather: current conditions from an EcoWitt gateway on the local network (no API calls) or a Weather
+// Underground personal weather station; the forecast from Weather Underground. Metric units.
 static const int WX_TRACE = 24;  // 24 h at hourly steps
 static const int WX_DAYS = 5;    // tonight + next 4 days
 
@@ -20,8 +21,13 @@ struct Weather {
   time_t obsUtc = 0;
   float  temp = NAN, feels = NAN, dew = NAN, wind = NAN, gust = NAN, pressure = NAN, rainToday = NAN;
   int    humidity = -1, windDir = -1;
-  // last 24 hours
+  String source;                              // where current conditions came from: "EcoWitt" or the WU station ID
+  // last 24 hours, built on the device from hourly averages of the current readings (seeded from WU history
+  // at start-up when a station is set), so the trace costs no API calls
   bool   haveHistory = false;
+  float  slotT[WX_TRACE] = {}, slotD[WX_TRACE] = {}, slotP[WX_TRACE] = {};
+  uint16_t slotNT[WX_TRACE] = {}, slotND[WX_TRACE] = {}, slotNP[WX_TRACE] = {};
+  uint32_t slotHour[WX_TRACE] = {};            // hours since 1970 that each slot holds
   float  traceT[WX_TRACE], traceD[WX_TRACE];  // NAN where no data
   float  change1h = NAN;                       // temperature change over the last hour
   float  pressure3h = NAN;                     // pressure change over 3 hours
@@ -32,12 +38,23 @@ struct Weather {
   WxDay  days[WX_DAYS];                        // tonight, then the next four days (night conditions)
   String forecastTitle, forecastText;          // WU text forecast: "TODAY" (daytime) or "TONIGHT" once the day is over
   // status
-  String error;                                // last error, empty if fine
+  String error;                                // last error from current conditions, empty if fine
+  String wuError;                              // last Weather Underground forecast/history error (kept separately so
+                                               // a working EcoWitt gateway doesn't hide it), empty if fine
 };
 
 enum WxPart { WX_CURRENT, WX_HISTORY, WX_FORECAST };
 
+// Settings snapshot for the network task (it must not read cfg directly).
+struct WxSetup {
+  String station, key;   // Weather Underground station ID and API key (the key is needed for the forecast)
+  String ecowitt;        // EcoWitt gateway address; when set, current conditions come from it
+  double lat = 0, lon = 0;
+};
+
 // Fetch one part into w. Returns false (and sets w.error) on failure; other parts are untouched.
-// Takes the station and key as arguments (not from cfg) because it runs in the network task.
-bool weatherFetch(WxPart part, Weather& w, const String& station, const String& key, double lat, double lon);
-bool weatherConfigured();
+// WX_CURRENT reads the EcoWitt gateway when one is set, else the WU station. WX_HISTORY (WU) only seeds the trace.
+bool weatherFetch(WxPart part, Weather& w, const WxSetup& s);
+bool weatherConfigured();      // some source of current conditions is set up
+bool weatherHasForecast();     // a WU API key is set (needed for the forecast)
+bool weatherUsesEcowitt();

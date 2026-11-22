@@ -22,7 +22,7 @@ struct Settings {
   bool nightDim = false;            // dim between nightFrom and nightTo (local hours)
   int  nightFrom = 22, nightTo = 7;
   int  footerSeconds = 4;           // footer rotation
-  int  startScreen = 0;             // screen shown at start-up and returned to when idle (0 forecast, 1 weather, 2 status)
+  int  startScreen = 0;             // screen shown at start-up and returned to when idle (0 forecast, 1 weather, 2 status, 3 observatory)
 
   // Scoring (deep-sky)
   int goodMaxCloud = 20;            // %
@@ -31,7 +31,19 @@ struct Settings {
 
   // Weather Underground (personal weather station API)
   String wuStation = "";
-  String wuKey = "";                // empty = weather screen shows setup instructions
+  String wuKey = "";                // needed for the forecast (and for current conditions without EcoWitt)
+  String ecowittHost = "";          // EcoWitt gateway address; when set, current conditions come from it (no API calls)
+
+  // Observatory screen. Alpaca devices are written "host[:port][/device]" (port 11111 and device 0 by default);
+  // a leading https:// is allowed for devices behind a proxy. Empty = not shown.
+  bool   obsEnabled = false;
+  String obsRoof = "";              // Alpaca Dome (roll-off roof)
+  String obsSafety = "";            // Alpaca SafetyMonitor giving the safety verdict (e.g. Llama Watch)
+  String obsRain = "";              // rain sensor: Alpaca SafetyMonitor address, or "udp" / "udp:<name>" for a UDP safety broadcast
+  String obsSky = "";               // Alpaca ObservingConditions (cloud cover, SQM, sky brightness, sky temperature)
+  static const int MAX_RIGS = 6;
+  String rigName[MAX_RIGS], rigHost[MAX_RIGS];  // NINA Advanced API: "host[:port]" (port 1888 by default)
+  int    obsHoldHour = 12;          // a finished (or lost) night's run stays on screen until this local hour
 
   // Device
   String hostname = "skydisplay";
