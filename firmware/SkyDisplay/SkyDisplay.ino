@@ -106,6 +106,7 @@ static void stepScreen(int d) {
   int ord[SCREEN_COUNT]; int n = screenOrder(ord), pos = 0;
   for (int i = 0; i < n; i++) if (ord[i] == ui.screen) pos = i;
   ui.screen = ord[(pos + d + n) % n];
+  ui.wxText = false;  // the weather screen always opens on the day strip
 }
 
 static void drawScreen() {
@@ -224,7 +225,7 @@ static void netPollObservatory() {
     DataGuard g;
     if (!cfg.obsEnabled) return;
     c.roof = cfg.obsRoof; c.safety = cfg.obsSafety; c.rain = cfg.obsRain; c.sky = cfg.obsSky; c.holdHour = cfg.obsHoldHour;
-    for (int i = 0; i < OBS_MAX_RIGS; i++) { c.rigName[i] = cfg.rigName[i]; c.rigHost[i] = cfg.rigHost[i]; }
+    for (int i = 0; i < OBS_MAX_RIGS; i++) { c.rigName[i] = cfg.rigName[i]; c.rigHost[i] = cfg.rigHost[i]; c.rigPark[i] = cfg.rigPark[i]; }
     work = obs;
   }
   uint32_t t0 = millis();
@@ -447,6 +448,8 @@ void loop() {
         Serial.printf("[main] tap: footer page %d\n", ui.footerPage);
       } else if (ui.screen == SCREEN_OBS) {
         ui.rigPage++;  // next two rigs (wraps when drawn)
+      } else if (ui.screen == SCREEN_WEATHER) {
+        ui.wxText = !ui.wxText;  // small screen: text forecast <-> day strip (the square screen shows both)
       }
     }
     // Redraw now; the rotation timer restarts from here.
@@ -460,7 +463,7 @@ void loop() {
   if (bl != currentBacklight) { uiSetBacklight(bl); currentBacklight = bl; }
 
   // Footer rotation: advance a page, then draw. A tap already drew, so it skips one advance.
-  if (ui.screen != homeScreen() && millis() - lastTouchMs > SCREEN_RETURN_MS) { ui.screen = homeScreen(); nextDrawMs = 0; }
+  if (ui.screen != homeScreen() && millis() - lastTouchMs > SCREEN_RETURN_MS) { ui.screen = homeScreen(); ui.wxText = false; nextDrawMs = 0; }
   if (ui.screen == SCREEN_OBS && !cfg.obsEnabled) ui.screen = SCREEN_FORECAST;  // turned off on the settings page
   if (webUpdating()) { delay(10); return; }  // keep the update message on screen
   if ((int32_t)(millis() - nextDrawMs) >= 0) {

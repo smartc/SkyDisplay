@@ -533,9 +533,9 @@ void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const S
     text(b, 456, 161, fBody, C_FG, baseline_right);
   } else text(MINUS, 456, 161, fBody, C_MUTED, baseline_right);
 
-  // ---- text forecast (square screen only) ----
-  if (TALL) {
-    const int ty = 198, th = 148;
+  // ---- text forecast: always on the square screen; on the small one in place of the day strip, after a tap ----
+  if (TALL || s.wxText) {
+    const int ty = 198, th = TALL ? 148 : 114;
     spr.fillSmoothRoundRect(12, ty, 456, th, 10, c565(C_TILE)); spr.drawRoundRect(12, ty, 456, th, 10, c565(C_LINE));
     String title = wx.forecastTitle.length() ? wx.forecastTitle : String("FORECAST");
     text((title + " (WU)").c_str(), 24, ty + 20, fSmall, C_MUTED, baseline_left, 200);
@@ -547,7 +547,9 @@ void uiDrawWeather(const UiState& s, const Weather& wx, bool configured, const S
     if (!wx.haveForecast && wx.wuError.length()) wrapText(("Forecast unavailable: " + wx.wuError).c_str(), 24, ty + 34, 432, fBody, C_MAYBE, 25, 4);
     else if (!wx.haveForecast) text(weatherHasForecast() ? "Pending" : "Needs a Weather Underground API key", 24, ty + 52, fBody, C_IDLE, baseline_left, 432);
     else if (!wx.forecastText.length()) text("No text forecast", 24, ty + 52, fBody, C_IDLE, baseline_left);
-    else wrapText(wx.forecastText.c_str(), 24, ty + 32, 432, fTitle, C_FG, 28, 4);
+    else if (TALL) wrapText(wx.forecastText.c_str(), 24, ty + 32, 432, fTitle, C_FG, 28, 4);
+    else wrapText(wx.forecastText.c_str(), 24, ty + 30, 432, fBody, C_FG, 21, 4);
+    if (!TALL) { spr.pushSprite(0, 0); return; }  // the strip comes back on the next tap
   }
 
   // ---- day strip: today's daytime (while it lasts), then tonight and four more nights ----
@@ -676,6 +678,16 @@ static RigText rigText(const ObsRig& r, time_t now) {
   return t;
 }
 
+// The rig's pier, from its park sensor: text and colour (empty when no sensor is tied to the rig).
+static const char* pierText(const ObsRig& r, uint32_t& col) {
+  switch (r.pier) {
+    case PIER_PARKED: col = C_GO; return "Pier parked";
+    case PIER_UNPARKED: col = C_BLUE; return "Pier unparked";
+    case PIER_OFFLINE: col = (r.state == RIG_INACTIVE || r.state == RIG_UNKNOWN) ? C_IDLE : C_NO; return "Park sensor offline";
+    default: col = C_IDLE; return "";
+  }
+}
+
 void uiDrawObservatory(const UiState& s, const Observatory& o, const String& settingsUrl) {
   spr.fillScreen(c565(C_BG));
   header(s, "Observatory");
@@ -763,9 +775,12 @@ void uiDrawObservatory(const UiState& s, const Observatory& o, const String& set
       if (strcmp(cols[k].v, MINUS)) text(cols[k].u, x, 211, fSmall, C_IDLE, baseline_left, 80);
     }
 
-    // park sensors: pills when they fit, else coloured dots
-    text("MOUNT PARK SENSORS", 12, 244, fSmall, C_MUTED, baseline_left);
-    if (!o.nPark) text("None heard yet", 12, 268, fBody, C_IDLE, baseline_left);
+    // park sensors not tied to a rig: pills when they fit, else coloured dots. Hidden when every sensor is in a rig row.
+    bool rigPiers = false; for (int i = 0; i < o.nRigs; i++) if (o.rigs[i].pier != PIER_NONE) rigPiers = true;
+    bool showPark = o.nPark > 0 || !rigPiers;
+    if (showPark) text("MOUNT PARK SENSORS", 12, 244, fSmall, C_MUTED, baseline_left);
+    if (!showPark) {}
+    else if (!o.nPark) text("None heard yet", 12, 268, fBody, C_IDLE, baseline_left);
     else {
       int need = 0;
       for (int i = 0; i < o.nPark; i++) { spr.setFont(&fBody.font); need += spr.textWidth(o.park[i].name.c_str()) + 6 + pillWidth(parkWord(o.park[i])) + 14; }
@@ -778,11 +793,12 @@ void uiDrawObservatory(const UiState& s, const Observatory& o, const String& set
     }
 
     // rigs
-    text("RIGS", 12, 296, fSmall, C_MUTED, baseline_left); pageDots(54, 291);
-    if (!o.nRigs) text("No rigs set up", 12, 322, fBody, C_IDLE, baseline_left);
+    int ry = showPark ? 296 : 244;
+    text("RIGS", 12, ry, fSmall, C_MUTED, baseline_left); pageDots(54, ry - 5);
+    if (!o.nRigs) text("No rigs set up", 12, ry + 26, fBody, C_IDLE, baseline_left);
     for (int i = r0; i < r1; i++) {
       const ObsRig& r = o.rigs[i]; RigText t = rigText(r, now);
-      int y = 304 + (i - r0) * 84;
+      int y = ry + 8 + (i - r0) * 84;
       spr.fillSmoothRoundRect(12, y, 456, 76, 10, c565(C_TILE)); spr.drawRoundRect(12, y, 456, 76, 10, c565(C_LINE));
       glowDot(28, y + 19, 6, t.col, t.glow);
       text(r.name.c_str(), 42, y + 26, fBodyB, C_FG, baseline_left, 106);
@@ -791,6 +807,8 @@ void uiDrawObservatory(const UiState& s, const Observatory& o, const String& set
       text(t.l2.c_str(), 42, y + 48, fBody, t.word[0] == 'L' ? C_NO : C_MUTED, baseline_left, 250);
       if (t.l3.length()) text(t.l3.c_str(), 42, y + 68, fSmall, C_IDLE, baseline_left, 250);
       if (t.right.length()) text(t.right.c_str(), 456, y + 68, fSmall, C_MUTED, baseline_right, 180);
+      uint32_t pc; const char* pt = pierText(r, pc);
+      if (*pt) text(pt, 456, y + 48, fSmall, pc, baseline_right, 160);
     }
   } else {
     // roof, safety, cloud tiles
@@ -815,8 +833,9 @@ void uiDrawObservatory(const UiState& s, const Observatory& o, const String& set
     }
     text(line.c_str(), 12, 124, fSmall, reason.length() ? C_NO : C_MUTED, baseline_left, 456);
     // park sensors
-    text("PARK", 12, 150, fSmall, C_MUTED, baseline_left);
-    if (!o.nPark) text("None heard yet", 56, 150, fSmall, C_IDLE, baseline_left);
+    bool rigPiers = false; for (int i = 0; i < o.nRigs; i++) if (o.rigs[i].pier != PIER_NONE) rigPiers = true;
+    if (o.nPark || !rigPiers) text("PARK", 12, 150, fSmall, C_MUTED, baseline_left);
+    if (!o.nPark && !rigPiers) text("None heard yet", 56, 150, fSmall, C_IDLE, baseline_left);
     int px = 56;
     for (int i = 0; i < o.nPark && px < 430; i++) {
       spr.fillSmoothCircle(px + 4, 145, 4, c565(parkCol(o.park[i])));
@@ -836,6 +855,8 @@ void uiDrawObservatory(const UiState& s, const Observatory& o, const String& set
       text(t.l2.c_str(), 38, y + 42, fSmall, t.word[0] == 'L' ? C_NO : C_MUTED, baseline_left, 270);
       if (t.l3.length()) text(t.l3.c_str(), 38, y + 61, fSmall, C_IDLE, baseline_left, 270);
       if (t.right.length()) text(t.right.c_str(), 458, y + 42, fSmall, C_MUTED, baseline_right, 150);
+      uint32_t pc; const char* pt = pierText(r, pc);
+      if (*pt) text(pt, 458, y + 61, fSmall, pc, baseline_right, 160);
     }
   }
   spr.pushSprite(0, 0);
@@ -950,7 +971,15 @@ void uiScreenshot(Stream& out) {
   out.printf("SHOT %d %d rgb565be\n", W, H);
   const uint8_t* p = (const uint8_t*)buf;
   size_t total = (size_t)W * H * 2, sent = 0;
-  while (sent < total) { size_t n = min((size_t)1024, total - sent); sent += out.write(p + sent, n); }
+  // Give up if the reader stops taking data (a closed Wi-Fi connection or an unread serial port): writes then
+  // return 0 forever, and without this the loop never ends and the whole display freezes.
+  uint32_t lastProgress = millis();
+  while (sent < total) {
+    size_t n = min((size_t)1024, total - sent), w = out.write(p + sent, n);
+    if (w) { sent += w; lastProgress = millis(); continue; }
+    if (millis() - lastProgress > 3000) return;  // no progress for 3 s: abandon the dump
+    delay(5);
+  }
   out.println();
   out.println("SHOT END");
 }

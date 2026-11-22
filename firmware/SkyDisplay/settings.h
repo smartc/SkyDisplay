@@ -43,6 +43,8 @@ struct Settings {
   String obsSky = "";               // Alpaca ObservingConditions (cloud cover, SQM, sky brightness, sky temperature)
   static const int MAX_RIGS = 6;
   String rigName[MAX_RIGS], rigHost[MAX_RIGS];  // NINA Advanced API: "host[:port]" (port 1888 by default)
+  String rigPark[MAX_RIGS];         // optional park sensor: the name or serial of one heard on the UDP broadcast, or an
+                                    // Alpaca Switch address "host:port[/device][#switch]" (on = parked)
   int    obsHoldHour = 12;          // a finished (or lost) night's run stays on screen until this local hour
 
   // Device

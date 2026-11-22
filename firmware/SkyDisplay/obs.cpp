@@ -68,12 +68,12 @@ static bool parseAlpaca(String s, String& base, int& dev) {
 
 static uint32_t txn = 1;
 // One Alpaca property. Returns true when the device answered; ok false when it returned an Alpaca error.
-static bool alpaca(const String& base, const char* type, int dev, const char* prop, JsonDocument& doc, bool& ok, String* err = nullptr) {
+static bool alpaca(const String& base, const char* type, int dev, const char* prop, JsonDocument& doc, bool& ok, String* err = nullptr, const String& extra = "") {
   JsonDocument filter;
   filter["Value"] = true; filter["ErrorNumber"] = true; filter["ErrorMessage"] = true;
   filter["Comments"]["UnsafeMonitors"][0]["Monitor"] = true;   // Llama Watch: why it's unsafe
   filter["Comments"]["UnsafeMonitors"][0]["Reason"] = true;
-  String url = base + "/api/v1/" + type + "/" + String(dev) + "/" + prop + "?ClientID=7&ClientTransactionID=" + String(txn++);
+  String url = base + "/api/v1/" + type + "/" + String(dev) + "/" + prop + "?ClientID=7&ClientTransactionID=" + String(txn++) + extra;
   int code = getJson(url, filter, doc, 4000);
   if (code != 200 && code != 400 && code != 500) return false;  // no answer
   ok = (doc["ErrorNumber"] | 0) == 0 && !doc["Value"].isNull();
@@ -316,13 +316,43 @@ void obsPoll(Observatory& o, const ObsConfig& c) {
     } else o.sky.sqm = o.sky.lux = o.sky.skyT = o.sky.ambient = NAN;
   }
 
-  // Park sensors heard on UDP, sorted by name
+  // Park sensors. Each rig can name the park sensor on its pier: one heard on the UDP broadcast (by name or serial),
+  // or an Alpaca Switch address (anything with a dot, colon or "://"). A sensor tied to a rig is shown in that rig's
+  // row; the rest are listed on their own, sorted by name.
+  int pier[OBS_MAX_RIGS];
+  bool used[OBS_MAX_PARK + 4] = {};
+  for (int i = 0; i < OBS_MAX_RIGS; i++) {
+    pier[i] = PIER_NONE;
+    String a = c.rigPark[i]; a.trim();
+    if (!a.length() || !c.rigHost[i].length()) continue;
+    pier[i] = PIER_OFFLINE;  // until it's heard from
+    bool address = a.indexOf("://") >= 0 || ((a.indexOf('.') >= 0 || a.indexOf(':') >= 0) && a.indexOf(' ') < 0);
+    if (address) {
+      int sw = 0, hash = a.indexOf('#');
+      if (hash >= 0) { sw = a.substring(hash + 1).toInt(); a = a.substring(0, hash); }
+      JsonDocument dp; bool okp;
+      if (parseAlpaca(a, base, dev) && alpaca(base, "switch", dev, "getswitch", dp, okp, nullptr, "&Id=" + String(sw)) && okp)
+        pier[i] = (dp["Value"] | false) ? PIER_PARKED : PIER_UNPARKED;  // switch on = parked
+      continue;
+    }
+    String want = a; want.toLowerCase();
+    int best = -1;
+    for (int k = 0; k < nu; k++) {
+      if (us[k].isSafety) continue;
+      String n = us[k].name, id = us[k].id; n.toLowerCase(); id.toLowerCase();
+      if (n == want || id == want) { best = k; break; }          // exact name or serial
+      if (best < 0 && n.indexOf(want) >= 0) best = k;             // else the first name containing it
+    }
+    if (best < 0) continue;
+    used[best] = true;
+    if (millis() - us[best].lastMs <= UDP_STALE_MS) pier[i] = us[best].safe ? PIER_PARKED : PIER_UNPARKED;
+  }
   o.nPark = 0;
-  for (int i = 0; i < nu && o.nPark < OBS_MAX_PARK; i++) {
-    if (us[i].isSafety) continue;
+  for (int k = 0; k < nu && o.nPark < OBS_MAX_PARK; k++) {
+    if (us[k].isSafety || used[k]) continue;
     ObsPark& p = o.park[o.nPark++];
-    p.id = us[i].id; p.name = us[i].name.length() ? us[i].name : us[i].id;
-    p.parked = us[i].safe; p.online = millis() - us[i].lastMs <= UDP_STALE_MS;
+    p.id = us[k].id; p.name = us[k].name.length() ? us[k].name : us[k].id;
+    p.parked = us[k].safe; p.online = millis() - us[k].lastMs <= UDP_STALE_MS;
   }
   for (int i = 1; i < o.nPark; i++) for (int j = i; j > 0 && o.park[j].name < o.park[j - 1].name; j--) std::swap(o.park[j], o.park[j - 1]);
 
@@ -335,12 +365,19 @@ void obsPoll(Observatory& o, const ObsConfig& c) {
     String name = c.rigName[i].length() ? c.rigName[i] : String("Rig ") + String(i + 1);
     if (r.name != name) { r = ObsRig(); r.name = name; }
     r.configured = true;
+    r.pier = pier[i];
     pollRig(r, host, c.holdHour, now);
     n++;
   }
   for (int i = n; i < OBS_MAX_RIGS; i++) o.rigs[i] = ObsRig();
   o.nRigs = n;
   o.polled = now;
+}
+
+int obsHeardParkSensors(String* names, int maxN) {
+  UdpSensor us[OBS_MAX_PARK + 4]; int nu = udpSnapshot(us, OBS_MAX_PARK + 4), n = 0;
+  for (int k = 0; k < nu && n < maxN; k++) if (!us[k].isSafety) names[n++] = us[k].name.length() ? us[k].name : us[k].id;
+  return n;
 }
 
 // ---------- Alpaca discovery (settings page) ----------

@@ -1,7 +1,7 @@
 #pragma once
 // Fixed constants. Anything a user might change lives in settings.h and the web page.
 
-#define FIRMWARE_VERSION "0.6.2"
+#define FIRMWARE_VERSION "0.6.5"
 
 // Show "stale" after this long without a successful chart check.
 #define STALE_MINUTES    180

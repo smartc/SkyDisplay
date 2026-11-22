@@ -17,6 +17,7 @@ struct UiState {
   String settingsUrl;       // e.g. http://192.168.1.50/ (the display's address)
   int dotIndex = 0, dotCount = 3;  // header dots: position of this screen in the swipe order
   int rigPage = 0;          // observatory screen: which two rigs are shown
+  bool wxText = false;      // weather screen on the small display: text forecast shown in place of the day strip
 };
 
 static const int FOOTER_PAGES = 3;

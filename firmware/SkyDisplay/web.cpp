@@ -42,9 +42,9 @@ input[type=number]{-moz-appearance:textfield}input::-webkit-inner-spin-button{op
 input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}.hint{font-size:.8rem;color:var(--muted)}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}button,.btn{font:inherit;background:#1b2742;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer;text-decoration:none}
 button.primary{background:var(--accent);color:#04101f;border-color:var(--accent);font-weight:600}button.warn{border-color:var(--warn);color:var(--warn)}
-.rigrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) auto;gap:8px 10px;align-items:center;margin-bottom:8px}
-.righead{font-size:.88rem;color:var(--muted);margin-bottom:4px}.righead span:last-child{grid-column:2/-1}
-@media(max-width:520px){.rigrow{grid-template-columns:minmax(0,1fr) auto}.rigrow input:first-child{grid-column:1/-1}.righead{display:none}}
+.rigrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1.4fr) auto;gap:8px 10px;align-items:center;margin-bottom:8px}
+.righead{font-size:.88rem;color:var(--muted);margin-bottom:4px}
+@media(max-width:620px){.rigrow{grid-template-columns:minmax(0,1fr) auto}.rigrow input:nth-child(1),.rigrow input:nth-child(2){grid-column:1/-1}.righead{display:none}.rigrow{padding-bottom:8px;border-bottom:1px solid var(--line)}}
 .check{display:flex;gap:8px;align-items:center;color:var(--fg);min-height:40px}.check input{width:18px;height:18px}table{border-collapse:collapse;font-size:.9rem}td{padding:2px 14px 2px 0}td:first-child{color:var(--muted)}
 )CSS";
 
@@ -171,23 +171,33 @@ static void handleRoot() {
   h += F("<div style='grid-column:1/-1'><div class='row'><button type='button' id='findBtn'>Find Alpaca devices</button>"
          "<span class='hint' id='findMsg'>Searches this network (takes a few seconds).</span></div><div id='found' style='margin-top:8px'></div></div>"
          "<p class='hint' style='grid-column:1/-1;margin:0'>Mount park sensors and safety sensors that broadcast on UDP port 23435 (Dark Dragons format) appear by themselves."
-         " Rigs use NINA's Advanced API plugin: <code>host</code> or <code>host:port</code> (port 1888 if left out).</p>");
+         " Rigs use NINA's Advanced API plugin: <code>host</code> or <code>host:port</code> (port 1888 if left out)."
+         " A rig's park sensor is optional: the name of the sensor on its pier, as heard on the UDP broadcast (suggested as you type"
+         " once heard), or an Alpaca Switch address (<code>host:port</code> or <code>host:port/device</code>; add <code>#N</code>"
+         " for a switch other than 0; on means parked).</p>");
   // Rigs: one row each (name, NINA address, Remove), plus Add rig. Rows are renumbered rN0/rH0... before saving.
   h += F("<div style='grid-column:1/-1'><h3 style='font-size:.95rem;margin:4px 0 8px'>Rigs</h3>"
-         "<div class='rigrow righead'><span>Name</span><span>NINA address</span></div><div id='rigs'>");
+         "<div class='rigrow righead'><span>Name</span><span>NINA address</span><span>Park sensor (optional)</span><span></span></div><div id='rigs'>");
   const char* ROW_A = "<div class='rigrow'><input aria-label='Rig name' placeholder='e.g. East pier' value='";
   const char* ROW_B = "'><input aria-label='NINA address' placeholder='host or host:port' autocapitalize='none' autocorrect='off' spellcheck='false' value='";
+  const char* ROW_P = "'><input aria-label='Park sensor' list='parkList' placeholder='Sensor name' autocapitalize='none' autocorrect='off' spellcheck='false' value='";
   const char* ROW_C = "'><button type='button' class='rm'>Remove</button></div>";
   int shown = 0;
   for (int i = 0; i < Settings::MAX_RIGS; i++) {
     if (!cfg.rigHost[i].length() && !cfg.rigName[i].length()) continue;
-    h += ROW_A + esc(cfg.rigName[i]) + ROW_B + esc(cfg.rigHost[i]) + ROW_C; shown++;
+    h += ROW_A + esc(cfg.rigName[i]) + ROW_B + esc(cfg.rigHost[i]) + ROW_P + esc(cfg.rigPark[i]) + ROW_C; shown++;
   }
-  if (!shown) h += String(ROW_A) + ROW_B + ROW_C;  // start with one empty row
+  if (!shown) h += String(ROW_A) + ROW_B + ROW_P + ROW_C;  // start with one empty row
   h += F("</div><div class='row'><button type='button' id='addRig'>Add rig</button><span class='hint' id='rigMax'></span></div></div>");
-  h += "<template id='rigTpl'>" + String(ROW_A) + ROW_B + ROW_C + "</template>";
+  h += "<template id='rigTpl'>" + String(ROW_A) + ROW_B + ROW_P + ROW_C + "</template>";
+  {
+    String heard[OBS_MAX_PARK]; int nh = obsHeardParkSensors(heard, OBS_MAX_PARK);
+    h += "<datalist id='parkList'>";
+    for (int i = 0; i < nh; i++) h += "<option value='" + esc(heard[i]) + "'>";
+    h += "</datalist>";
+  }
   h += "<script>(()=>{const MAX=" + String(Settings::MAX_RIGS) + ",list=document.getElementById('rigs'),add=document.getElementById('addRig'),note=document.getElementById('rigMax');"
-       "const sync=()=>{[...list.children].forEach((r,i)=>{const [n,a]=r.querySelectorAll('input');n.name='rN'+i;a.name='rH'+i;});"
+       "const sync=()=>{[...list.children].forEach((r,i)=>{const [n,a,p]=r.querySelectorAll('input');n.name='rN'+i;a.name='rH'+i;p.name='rP'+i;});"
        "const full=list.children.length>=MAX;add.disabled=full;note.textContent=full?'Up to '+MAX+' rigs.':'';};"
        "list.addEventListener('click',e=>{if(e.target.classList.contains('rm')){e.target.parentElement.remove();sync();}});"
        "add.addEventListener('click',()=>{list.appendChild(document.getElementById('rigTpl').content.cloneNode(true));sync();list.lastElementChild.querySelector('input').focus();});"
@@ -298,11 +308,11 @@ static void handleSave() {
   {
     int n = 0;  // rows without an address are dropped; the rest move up so the list has no gaps
     for (int i = 0; i < Settings::MAX_RIGS; i++) {
-      String name = arg(("rN" + String(i)).c_str()), host = arg(("rH" + String(i)).c_str());
+      String name = arg(("rN" + String(i)).c_str()), host = arg(("rH" + String(i)).c_str()), park = arg(("rP" + String(i)).c_str());
       if (!host.length()) continue;
-      cfg.rigName[n] = name; cfg.rigHost[n] = host; n++;
+      cfg.rigName[n] = name; cfg.rigHost[n] = host; cfg.rigPark[n] = park; n++;
     }
-    for (int i = n; i < Settings::MAX_RIGS; i++) { cfg.rigName[i] = ""; cfg.rigHost[i] = ""; }
+    for (int i = n; i < Settings::MAX_RIGS; i++) { cfg.rigName[i] = ""; cfg.rigHost[i] = ""; cfg.rigPark[i] = ""; }
   }
   cfg.obsHoldHour = argInt("oHold", 0, 23, cfg.obsHoldHour);
   cfg.goodMaxCloud = argInt("goodCloud", 0, 60, cfg.goodMaxCloud);

@@ -53,6 +53,7 @@ void settingsLoad() {
   for (int i = 0; i < Settings::MAX_RIGS; i++) {
     cfg.rigName[i] = prefs.getString(("rN" + String(i)).c_str(), "");
     cfg.rigHost[i] = prefs.getString(("rH" + String(i)).c_str(), "");
+    cfg.rigPark[i] = prefs.getString(("rP" + String(i)).c_str(), "");
   }
   cfg.hostname      = prefs.getString("host", d.hostname);
   cfg.webPassword   = prefs.getString("webPass", d.webPassword);
@@ -93,6 +94,7 @@ void settingsSave() {
   for (int i = 0; i < Settings::MAX_RIGS; i++) {
     prefs.putString(("rN" + String(i)).c_str(), cfg.rigName[i]);
     prefs.putString(("rH" + String(i)).c_str(), cfg.rigHost[i]);
+    prefs.putString(("rP" + String(i)).c_str(), cfg.rigPark[i]);
   }
   prefs.putString("host", cfg.hostname);
   prefs.putString("webPass", cfg.webPassword);
