@@ -9,7 +9,7 @@
 // Touch: tap = next footer page (status screen: "Refresh now" button; notifications: top half newer, bottom half
 // older, plus the buttons along the bottom), long press = dim.
 // Serial commands (115200 on the WT32, 460800 on the Indicator): s = screenshot dump, r = check chart and weather now, d = dump decoded rows,
-//   a = sun/moon times, n = next screen, 0-4 = show a screen, i = info, W = forget Wi-Fi and restart.
+//   a = sun/moon times, n = next screen, 0-5 = show a screen, i = info, W = forget Wi-Fi and restart.
 
 #include <WiFi.h>
 #include <WiFiManager.h>
@@ -121,12 +121,30 @@ static void buildStatus(StatusInfo& st) {
   st.refreshing = refreshPending && millis() - refreshTapMs < 60000;  // gives up on the label after a minute (no Wi-Fi)
 }
 
+// About screen: device, firmware, network and credits; the QR code opens the repository.
+static void buildAbout(StatusInfo& st) {
+  auto L = [&](const String& l, const String& v, bool warn = false) { if (st.nLeft < 8) { st.left[st.nLeft++] = {l, v, warn}; } };
+  L("DEVICE", cfg.hostname + "  \xC2\xB7  " BOARD_NAME);
+  L("FIRMWARE", "SkyDisplay " FIRMWARE_VERSION ", built " __DATE__);
+#if BOARD_HAS_SOUND
+  L("BUZZER", soundStatus(), !soundReady());
+#endif
+  L("NETWORK", WiFi.localIP().toString() + "  \xC2\xB7  " + WiFi.macAddress());
+  uint32_t up = millis() / 60000;
+  L("UP / MEMORY", (up >= 1440 ? String(up / 1440) + "d " : "") + String(up / 60 % 24) + "h " + String(up % 60) + "m  \xC2\xB7  "
+                   + String(ESP.getFreeHeap() / 1024) + " KB free (" + String(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024) + " KB block)");
+  L("DATA", "Clear Sky Chart (Dark Dragons), Weather Underground, EcoWitt");
+  L("NOTIFICATIONS", "Unofficial Pushover Open Client, not made by Pushover");
+  L("LICENCE", "MIT  \xC2\xB7  (c) 2026 smartc");
+  st.qrUrl = REPO_URL;
+}
+
 // Swipe order; the observatory screen only when it's turned on.
 static int screenOrder(int* out) {
   int n = 0; out[n++] = SCREEN_FORECAST; out[n++] = SCREEN_WEATHER;
   if (cfg.obsEnabled) out[n++] = SCREEN_OBS;
   if (cfg.poEnabled) out[n++] = SCREEN_PO;
-  out[n++] = SCREEN_STATUS; return n;
+  out[n++] = SCREEN_STATUS; out[n++] = SCREEN_ABOUT; return n;
 }
 static bool screenOn(int s) { return (s != SCREEN_OBS || cfg.obsEnabled) && (s != SCREEN_PO || cfg.poEnabled); }
 static int homeScreen() { return screenOn(cfg.startScreen) ? cfg.startScreen : SCREEN_FORECAST; }
@@ -160,6 +178,7 @@ static void drawScreen() {
   ui.needsSetup = !chartTarget().ok;  // fresh device: show the first-run QR code instead of the forecast
   ui.settingsUrl = "http://" + WiFi.localIP().toString() + "/";
   if (ui.screen == SCREEN_STATUS) { StatusInfo st; buildStatus(st); uiDrawStatus(ui, st); }
+  else if (ui.screen == SCREEN_ABOUT) { StatusInfo st; buildAbout(st); uiDrawAbout(ui, st); }
   else if (ui.screen == SCREEN_WEATHER) uiDrawWeather(ui, wx, weatherConfigured(), "http://" + WiFi.localIP().toString() + "/");
   else if (ui.screen == SCREEN_OBS) uiDrawObservatory(ui, obs, "http://" + WiFi.localIP().toString() + "/");
   else if (ui.screen == SCREEN_PO) uiDrawNotifications(ui, poInbox, cfg.poSecret.length() && cfg.poDevice.length(), cfg.poDeviceName, ui.settingsUrl);
@@ -541,7 +560,7 @@ void loop() {
     else if (c == 'd') dumpRows();
     else if (c == 'a') printSky();
     else if (c == 'n') { stepScreen(1); lastTouchMs = millis(); drawScreen(); }  // next screen (testing)
-    else if (c >= '0' && c <= '4') { ui.screen = c - '0'; lastTouchMs = millis(); if (ui.screen == SCREEN_OBS) nextObsMs = millis(); drawScreen(); }  // jump to a screen (testing)
+    else if (c >= '0' && c <= '5') { ui.screen = c - '0'; lastTouchMs = millis(); if (ui.screen == SCREEN_OBS) nextObsMs = millis(); drawScreen(); }  // jump to a screen (testing)
     // Previews of the setup screens (testing); the next redraw returns to normal.
     else if (c == 'q') { uiWifiSetupScreen(SETUP_AP_NAME, "http://192.168.4.1/"); nextDrawMs = millis() + 15000; }
     else if (c == 'Q') { UiState p = ui; p.nowUtc = nowUtc(); p.settingsUrl = "http://" + WiFi.localIP().toString() + "/"; uiFirstRunScreen(p); nextDrawMs = millis() + 15000; }

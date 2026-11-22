@@ -33,8 +33,8 @@ struct UiState {
 
 static const int FOOTER_PAGES = 3;
 
-// Screens. Swipe order is forecast, weather, observatory and notifications (each when turned on), status.
-enum Screen { SCREEN_FORECAST = 0, SCREEN_WEATHER = 1, SCREEN_STATUS = 2, SCREEN_OBS = 3, SCREEN_PO = 4, SCREEN_COUNT = 5 };
+// Screens. Swipe order is forecast, weather, observatory and notifications (each when turned on), status, about.
+enum Screen { SCREEN_FORECAST = 0, SCREEN_WEATHER = 1, SCREEN_STATUS = 2, SCREEN_OBS = 3, SCREEN_PO = 4, SCREEN_ABOUT = 5, SCREEN_COUNT = 6 };
 static const int OBS_RIGS_PER_PAGE = 2;
 
 // Status screen content, filled in by the main sketch.
@@ -50,6 +50,7 @@ void uiBegin(uint8_t brightness);
 void uiSetBacklight(uint8_t level);
 void uiDraw(const UiState& s);                           // forecast screen
 void uiDrawStatus(const UiState& s, const StatusInfo& st); // status screen
+void uiDrawAbout(const UiState& s, const StatusInfo& st);  // about screen: st.left rows, st.qrUrl = the repository
 // Weather screen. settingsUrl is shown when the station or key isn't set up yet.
 void uiDrawWeather(const UiState& s, const Weather& w, bool configured, const String& settingsUrl);
 // Observatory screen.

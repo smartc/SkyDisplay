@@ -25,6 +25,7 @@ struct SmoothFont {
 static SmoothFont fSmall, fBody, fBodyB, fTitle, fBig, fHuge;
 
 // ---------- palette ----------
+static const uint32_t C_ACCENT_ABOUT = 0x6FB6FF;
 static const uint32_t C_BG = 0x04060B, C_TILE = 0x0C111C, C_LINE = 0x1B2337, C_FG = 0xE6ECF7, C_MUTED = 0x9AA6BD,
                       C_GO = 0x3DDC84, C_MAYBE = 0xFFB43D, C_NO = 0xFF5A5A, C_IDLE = 0x5B6577,
                       C_MID = 0xD9333F, C_EMPTY = 0x141A26;
@@ -373,6 +374,40 @@ void uiDrawStatus(const UiState& s, const StatusInfo& st) {
     }
     refreshButton(st.refreshing);
     text("Swipe for the other screens", W / 2, H - 22, fSmall, C_IDLE, top_center);
+  }
+  spr.pushSprite(0, 0);
+}
+
+// About screen: what this display is, and where its code and instructions live (QR code).
+void uiDrawAbout(const UiState& s, const StatusInfo& st) {
+  spr.fillScreen(c565(C_BG));
+  header(s, "About");
+  String repo = st.qrUrl; repo.replace("https://", "");
+  if (TALL) {
+    text("SkyDisplay", 16, 40, fTitle, C_FG, top_left);
+    for (int k = 0; k < st.nLeft; k++) {
+      int y = 76 + k * 35;
+      text(st.left[k].label.c_str(), 16, y, fSmall, C_MUTED, top_left, W - 32);
+      text(st.left[k].value.c_str(), 16, y + 15, fBody, st.left[k].warn ? C_MAYBE : C_FG, top_left, W - 32);
+    }
+    spr.drawFastHLine(12, 362, W - 24, c565(C_LINE));
+    const int qw = 92, qx = W - 18 - qw, qy = 374;
+    spr.fillRoundRect(qx - 5, qy - 5, qw + 10, qw + 10, 8, TFT_WHITE);
+    spr.qrcode(st.qrUrl.c_str(), qx, qy, qw, 3);
+    text("Code, instructions and updates", 16, 384, fBody, C_FG, top_left, qx - 40);
+    text(repo.c_str(), 16, 410, fBody, C_ACCENT_ABOUT, top_left, qx - 40);
+  } else {
+    text("SkyDisplay", 16, 34, fTitle, C_FG, top_left);
+    for (int k = 0; k < st.nLeft; k++) {
+      int y = 68 + k * 34;
+      text(st.left[k].label.c_str(), 16, y, fSmall, C_MUTED, top_left, 330);
+      text(st.left[k].value.c_str(), 16, y + 15, fBody, st.left[k].warn ? C_MAYBE : C_FG, top_left, 330);
+    }
+    const int qw = 96, qx = W - 12 - qw, qy = 50;
+    spr.fillRoundRect(qx - 6, qy - 6, qw + 12, qw + 12, 8, TFT_WHITE);
+    spr.qrcode(st.qrUrl.c_str(), qx, qy, qw, 3);
+    text("GitHub", qx + qw / 2, qy + qw + 12, fSmall, C_MUTED, top_center);
+    text(repo.c_str(), W - 12, H - 22, fSmall, C_ACCENT_ABOUT, top_right, W - 24);
   }
   spr.pushSprite(0, 0);
 }

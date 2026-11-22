@@ -28,6 +28,8 @@ It answers one question at a glance: is tonight, or tomorrow night, worth settin
   See "Notifications" below.
 - **Status:** Wi-Fi, IP address, chart, clock sync and weather status, a QR code for the settings page, and a
   **Refresh now** button (same as "Check chart and weather now" on the settings page).
+- **About:** device name and board, firmware version (and the Indicator's buzzer firmware), network, uptime and
+  memory, credits, and a QR code for this repository.
 
 Swipe between screens, tap to rotate the footer, long-press to dim. When the screen is dimmed, the first tap wakes it.
 The start-up screen is a setting; the display goes back to it after 2 minutes untouched (also a setting; 0 = never). On the Indicator the whole
