@@ -6,7 +6,9 @@
 // framing as Seeed's firmware. Each packet is one type byte and a little-endian payload.
 //   0xA1 BEEP_ON  u32 ms              one beep at the default pitch (compatible with Seeed's packet)
 //   0xA2 BEEP_OFF                     stop any sound
-//   0xA6 TONE     u16 Hz, u16 ms      one tone (the ESP32 times the patterns; a tone always ends by itself)
+//   0xA6 TONE     u16 Hz, u16 ms [, u8 volume 1-100]
+//                                     one tone (the ESP32 times the patterns; a tone always ends by itself).
+//                                     Volume sets the drive (PWM duty, 100 = 50%, the loudest); default 100.
 //   0xA7 PING                         answered with HELLO
 //   0xC7 HELLO    u8 version          sent every 2 s until the first PING, then in answer to PING
 //
@@ -14,7 +16,7 @@
 // (rp2040:rp2040:seeed_indicator_rp2040).
 // Flashing: see README.md in this folder.
 
-#define FW_VERSION 1
+#define FW_VERSION 2  // 2: TONE takes a volume
 static const int BUZZER = 19;              // passive piezo: needs a square wave
 static const uint16_t DEFAULT_HZ = 2700;   // near the piezo's loudest pitch
 
@@ -50,6 +52,20 @@ static void sendPacket(const uint8_t* data, size_t len) {
 static bool pinged = false;  // the ESP32 has asked; until then HELLO repeats (it may start later than us)
 static void sendHello() { uint8_t p[2] = {PKT_HELLO, FW_VERSION}; sendPacket(p, 2); }
 
+// Tones are PWM on the buzzer pin: the frequency is the pitch, the duty cycle the loudness (a passive piezo is
+// loudest at 50%). Each tone ends by itself at toneEndMs.
+static const uint32_t PWM_RANGE = 1000;
+static bool toneOn = false;
+static uint32_t toneEndMs = 0;
+static void startTone(uint16_t hz, uint16_t ms, uint8_t volume) {
+  volume = constrain(volume, 1, 100);
+  analogWriteRange(PWM_RANGE);
+  analogWriteFreq(hz);
+  analogWrite(BUZZER, PWM_RANGE / 2 * volume / 100);
+  toneOn = true; toneEndMs = millis() + ms;
+}
+static void stopTone() { analogWrite(BUZZER, 0); digitalWrite(BUZZER, LOW); toneOn = false; }
+
 static uint16_t u16(const uint8_t* p) { return p[0] | (p[1] << 8); }
 static uint32_t u32(const uint8_t* p) { return p[0] | (p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
 
@@ -57,13 +73,14 @@ static void handle(const uint8_t* p, size_t len) {
   if (!len) return;
   switch (p[0]) {
     case PKT_BEEP_ON:
-      if (len >= 5) tone(BUZZER, DEFAULT_HZ, min(u32(p + 1), (uint32_t)10000));
+      if (len >= 5) startTone(DEFAULT_HZ, min(u32(p + 1), (uint32_t)10000), 100);
       break;
-    case PKT_BEEP_OFF: noTone(BUZZER); digitalWrite(BUZZER, LOW); break;
+    case PKT_BEEP_OFF: stopTone(); break;
     case PKT_TONE:
       if (len >= 5) {
         uint16_t hz = constrain(u16(p + 1), 100, 8000), ms = min(u16(p + 3), (uint16_t)10000);
-        if (ms) tone(BUZZER, hz, ms);
+        uint8_t volume = len >= 6 ? p[5] : 100;
+        if (ms) startTone(hz, ms, volume);
       }
       break;
     case PKT_PING: pinged = true; sendHello(); break;
@@ -84,6 +101,7 @@ void loop() {
   static uint8_t raw[64], pkt[64];
   static size_t n = 0;
   static uint32_t helloAt = 0;
+  if (toneOn && (int32_t)(millis() - toneEndMs) >= 0) stopTone();
   if (!pinged && millis() - helloAt >= 2000) { helloAt = millis(); sendHello(); }
   while (Serial1.available()) {
     uint8_t c = Serial1.read();

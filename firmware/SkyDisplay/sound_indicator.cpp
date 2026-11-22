@@ -50,9 +50,12 @@ static void sendPacket(const uint8_t* d, size_t len) {
   buf[n++] = 0;
   rp.write(buf, n);
 }
+// Volume setting (1 low, 2 medium, 3 high) to the RP2040's drive level (100 = loudest; a piezo's loudness falls
+// off quickly as the drive drops, so the steps are uneven).
+static uint8_t driveLevel() { static const uint8_t L[4] = {100, 12, 35, 100}; return L[constrain(cfg.alarmVolume, 1, 3)]; }
 static void playTone(uint16_t hz, uint16_t ms) {
-  uint8_t p[5] = {PKT_TONE, (uint8_t)hz, (uint8_t)(hz >> 8), (uint8_t)ms, (uint8_t)(ms >> 8)};
-  sendPacket(p, sizeof p);
+  uint8_t p[6] = {PKT_TONE, (uint8_t)hz, (uint8_t)(hz >> 8), (uint8_t)ms, (uint8_t)(ms >> 8), driveLevel()};
+  sendPacket(p, sizeof p);  // firmware v1 ignores the volume byte
 }
 
 void soundBegin() {
@@ -114,5 +117,6 @@ void soundStop() {
   uint8_t p = PKT_BEEP_OFF; sendPacket(&p, 1);
 }
 bool soundAlarmOn() { return alarmOn; }
+bool soundHasVolume() { return ready && fwVersion >= 2; }
 
 #endif

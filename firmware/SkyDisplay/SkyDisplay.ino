@@ -147,10 +147,13 @@ static void stepScreen(int d) {
 static void drawScreen() {
   ui.nowUtc = nowUtc();
   if (ui.screen == SCREEN_PO) poInbox.unread = 0;  // seen
-  ui.sound = BOARD_HAS_SOUND ? (cfg.soundArmed ? 1 : 0) : -1;
+  ui.sound = BOARD_HAS_SOUND ? (cfg.soundArmed ? (soundHasVolume() ? cfg.alarmVolume : 3) : 0) : -1;
+  ui.soundLevels = soundHasVolume();
   ui.soundMissing = BOARD_HAS_SOUND && !soundReady();
   ui.alarmSounding = soundDrawn = soundAlarmOn();
   ui.poListen = cfg.poListen;
+  ui.poAuto = cfg.poAuto;
+  ui.poUntil = cfg.poListen ? (time_t)cfg.poListenUntil : 0;
   ui.poConfirmAll = poConfirmAllMs && millis() - poConfirmAllMs < 3000;
   { int ord[SCREEN_COUNT]; ui.dotCount = screenOrder(ord); ui.dotIndex = 0; ui.dotAlert = -1;
     for (int i = 0; i < ui.dotCount; i++) { if (ord[i] == ui.screen) ui.dotIndex = i; if (ord[i] == SCREEN_PO && poInbox.unread) ui.dotAlert = i; } }
@@ -515,6 +518,15 @@ void loop() {
     // No unacknowledged emergency left (acknowledged here or elsewhere, or cleared): the alarm has nothing to say.
     if (soundAlarmOn() && !poEmergencyWaiting()) { soundStop(); Serial.println("[main] alarm stopped: nothing left to acknowledge"); }
   }
+  // Monitoring switches itself off at the scheduled time (after any emergency is acknowledged).
+  if (cfg.poListen && cfg.poListenUntil && nowUtc() >= (time_t)cfg.poListenUntil) {
+    DataGuard g;
+    if (!poEmergencyWaiting()) {
+      cfg.poListen = false; cfg.poAuto = false; cfg.poListenUntil = 0; settingsSave(); poRestart();
+      Serial.println("[main] monitoring switched off (scheduled)");
+      nextDrawMs = 0; skipAdvance = true;
+    }
+  }
   if (poConfirmAllMs && millis() - poConfirmAllMs >= 3000) { poConfirmAllMs = 0; if (ui.screen == SCREEN_PO) { nextDrawMs = 0; skipAdvance = true; } }
 
   if (Serial.available()) {
@@ -604,13 +616,25 @@ void loop() {
         Serial.printf("[main] tap at %d,%d: %s%s\n", tx, ty, TAPS[t], silenced ? " (silenced the alarm)" : "");
         if (t != PO_TAP_CLEAR_ALL) poConfirmAllMs = 0;
         switch (t) {
-          case PO_TAP_SOUND:
-            if (!silenced) { cfg.soundArmed = !cfg.soundArmed; settingsSave(); }
+          case PO_TAP_SOUND:  // Off -> High -> Med -> Low -> Off (On / Off without volume support)
+            if (!silenced) {
+              if (!soundHasVolume()) cfg.soundArmed = !cfg.soundArmed;
+              else if (!cfg.soundArmed) { cfg.soundArmed = true; cfg.alarmVolume = 3; }
+              else if (cfg.alarmVolume > 1) cfg.alarmVolume--;
+              else cfg.soundArmed = false;
+              settingsSave();
+            }
             break;
-          case PO_TAP_MONITOR:
-            cfg.poListen = !cfg.poListen; settingsSave(); poRestart();
+          case PO_TAP_MONITOR: {  // On -> Auto -> Off -> On
+            bool was = cfg.poListen;
+            if (!cfg.poListen) { cfg.poListen = true; cfg.poAuto = false; }
+            else if (!cfg.poAuto) cfg.poAuto = true;
+            else { cfg.poListen = false; cfg.poAuto = false; }
+            poListenChanged(); settingsSave();
+            if (cfg.poListen != was) poRestart();
             if (!cfg.poListen) soundStop();
             break;
+          }
           case PO_TAP_CLEAR:
             poDelete(idx); ui.poIndex = min(idx, max(0, poInbox.n - 1));
             break;

@@ -21,10 +21,13 @@ struct UiState {
   bool wxText = false;      // weather screen on the small display: text forecast shown in place of the day strip
   int poIndex = 0;          // notifications screen: which message is shown in full
   int dotAlert = -1;        // header dot drawn amber (the notifications screen, while messages are unread)
-  int sound = -1;           // notifications screen sound switch: -1 not shown (no sound on this board), 0 off, 1 on
+  int sound = -1;           // notifications screen sound button: -1 not shown (no sound on this board), 0 off, 1-3 volume
+  bool soundLevels = false; // the button cycles volumes (Off, High, Med, Low); otherwise just On / Off
   bool soundMissing = false;  // the board has sound but its hardware didn't answer
   bool alarmSounding = false;
   bool poListen = true;     // notifications monitoring on (the screen's Monitoring switch)
+  bool poAuto = false;      // ... in Auto mode
+  time_t poUntil = 0;       // ... switching itself off at this time (0 = not scheduled)
   bool poConfirmAll = false;  // "Clear all" tapped once: the button asks for a second tap
 };
 

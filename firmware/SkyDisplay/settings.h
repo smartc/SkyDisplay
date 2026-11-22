@@ -52,11 +52,15 @@ struct Settings {
   // on the settings page (the account password is never stored).
   bool   poEnabled = false;
   bool   poListen = true;           // monitoring: connected to Pushover (off: messages wait there; also switched on the screen)
+  bool   poAuto = false;            // monitoring "Auto": switches itself off at poAutoOff:00 (see poListenChanged())
+  int    poAutoOff = 12;            // that hour, local time
+  uint32_t poListenUntil = 0;       // when that happens (UTC; 0 = not scheduled); kept across restarts
   int    poWake = 1;                // new message: 0 just counts it, 1 high priority and up wake the screen and show it, 2 all do
   String poSecret = "", poDevice = "", poDeviceName = "";
   // Alarm sound (boards with BOARD_HAS_SOUND): which notifications sound it, and the on/off switch (also on the screen).
   int    alarmLevel = 1;            // 0 never, 1 emergency (beep-beep until acknowledged), 2 also high priority (one chime)
   bool   soundArmed = true;
+  int    alarmVolume = 3;           // 1 low, 2 medium, 3 high
 
   // Device
   String hostname = "skydisplay";

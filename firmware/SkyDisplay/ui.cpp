@@ -971,21 +971,27 @@ static void poPill(const Rect& r, const char* label, uint32_t col, bool on, int 
 static void poButtons(const UiState& s, const PoInbox& in) {
   if (s.sound >= 0) {  // bell: sound on/off
     const Rect& r = PO_SOUND_BTN;
-    bool on = s.sound == 1 && !s.soundMissing && s.poListen;
+    bool on = s.sound > 0 && !s.soundMissing && s.poListen;
     uint32_t col = s.alarmSounding ? C_NO : on ? C_GO : C_IDLE;
-    const char* t = s.alarmSounding ? "Tap: silence" : s.soundMissing && s.sound == 1 ? "No buzzer" : s.sound == 1 ? "Sound on" : "Sound off";
+    static const char* LEVEL[4] = {"Sound off", "Sound low", "Sound med", "Sound high"};
+    const char* t = s.alarmSounding ? "Tap: silence" : s.soundMissing && s.sound > 0 ? "No buzzer"
+                  : s.sound <= 0 ? "Sound off" : s.soundLevels ? LEVEL[constrain(s.sound, 1, 3)] : "Sound on";
     poPill(r, t, col, on || s.alarmSounding, 18);
     int bx = r.x + 16, by = r.y + r.h / 2;
     spr.fillSmoothCircle(bx, by - 2, 6, c565(col));
     spr.fillRect(bx - 6, by - 2, 13, 6, c565(col));
     spr.fillRect(bx - 8, by + 3, 17, 2, c565(col));
     spr.fillSmoothCircle(bx, by + 7, 2, c565(col));
-    if (s.sound != 1) { spr.drawLine(bx - 9, by + 9, bx + 9, by - 9, c565(C_BG)); spr.drawLine(bx - 9, by + 8, bx + 8, by - 9, c565(col)); }
+    if (s.sound <= 0) { spr.drawLine(bx - 9, by + 9, bx + 9, by - 9, c565(C_BG)); spr.drawLine(bx - 9, by + 8, bx + 8, by - 9, c565(col)); }
   }
   {  // monitoring on/off: a dot, filled when connected
     const Rect& r = PO_MON_BTN;
     uint32_t col = !s.poListen ? C_IDLE : in.state == PO_CONNECTED ? C_GO : C_MAYBE;
-    poPill(r, s.poListen ? "Monitoring" : "Monitor off", col, s.poListen, 14);
+    char lab[24] = "Monitor off";
+    if (s.poListen && s.poAuto && s.poUntil) { struct tm tmv; localTm(s.poUntil, tmv); snprintf(lab, sizeof lab, "Auto: off %02d:%02d", tmv.tm_hour, tmv.tm_min); }
+    else if (s.poListen && s.poAuto) strcpy(lab, "Monitor auto");
+    else if (s.poListen) strcpy(lab, "Monitor on");
+    poPill(r, lab, col, s.poListen, 14);
     int cx = r.x + 16, cy = r.y + r.h / 2;
     if (s.poListen) spr.fillSmoothCircle(cx, cy, 5, c565(col));
     else spr.drawCircle(cx, cy, 5, c565(col));

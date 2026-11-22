@@ -236,11 +236,24 @@ static void handleRoot() {
   bool poLinked = cfg.poSecret.length() && cfg.poDevice.length();
   h += F("<section><h2>Notifications</h2><div class='grid'><label class='check' style='grid-column:1/-1'><input type='checkbox' name='poEn' value='1'");
   if (cfg.poEnabled) h += F(" checked");
-  h += F("> Show the notifications screen</label><label class='check' style='grid-column:1/-1'><input type='checkbox' name='poListen' value='1'");
-  if (cfg.poListen) h += F(" checked");
-  h += F("> Monitoring on <span class='hint'>(off: disconnected from Pushover and silent; messages wait there and arrive"
-         " quietly when it's back on. Also switched on the notifications screen.)</span></label>"
-         "<label>When a message arrives<select name='poWake'>");
+  h += F("> Show the notifications screen</label><label>Monitoring<select name='poMode'>");
+  {
+    int mode = !cfg.poListen ? 0 : cfg.poAuto ? 2 : 1;
+    char b[40]; snprintf(b, sizeof b, "Auto (off at %02d:00)", cfg.poAutoOff);
+    h += opt(1, mode, "On") + opt(2, mode, b) + opt(0, mode, "Off");
+  }
+  h += F("</select><span class='hint'>Off: disconnected from Pushover and silent; messages wait there and arrive quietly when it's"
+         " back on. Auto: on, then off by itself. Also switched with the Monitoring button on the notifications screen"
+         " (On, Auto, Off).");
+  if (cfg.poListen && cfg.poListenUntil) {
+    time_t u = cfg.poListenUntil; struct tm tmv; localtime_r(&u, &tmv); char b[40];
+    strftime(b, sizeof b, " Now on until %a %H:%M.", &tmv); h += b;
+  }
+  h += F("</span></label><label>Auto turns monitoring off at<select name='poAutoOff'>");
+  for (int hr = 0; hr < 24; hr++) { char b[8]; snprintf(b, sizeof b, "%02d:00", hr); h += opt(hr, cfg.poAutoOff, b); }
+  h += F("</select><span class='hint'>The next time this hour comes round after switching to Auto, at least 3 hours later"
+         " (Auto at 21:00 or at 10:30: off at noon the next day). Waits for any emergency to be acknowledged.");
+  h += F("</span></label><label>When a message arrives<select name='poWake'>");
   h += opt(0, cfg.poWake, "Count it, don't wake the screen") + opt(1, cfg.poWake, "High priority: wake and show it") + opt(2, cfg.poWake, "Always wake and show it");
   h += F("</select><span class='hint'>Emergency messages stay until you tap to acknowledge them.</span></label><div><span class='hint'>Status</span><div>");
   {
@@ -252,10 +265,16 @@ static void handleRoot() {
   h += F("<label>Alarm sound for<select name='alLevel'>");
   h += opt(1, cfg.alarmLevel, "Emergency messages") + opt(2, cfg.alarmLevel, "High priority and emergency") + opt(0, cfg.alarmLevel, "Nothing (silent)");
   h += F("</select><span class='hint'>Emergency: beep-beep every 3 s until you tap the screen (5 minutes at most). High priority: one short chime.</span></label>"
-         "<label class='check'><input type='checkbox' name='armed' value='1'");
-  if (cfg.soundArmed) h += F(" checked");
-  h += F("> Sound on <span class='hint'>(also switched on the notifications screen)</span></label><div><span class='hint'>Buzzer</span><div>");
+         "<label>Sound<select name='sound'>");
+  {
+    int cur = cfg.soundArmed ? (soundHasVolume() ? cfg.alarmVolume : 3) : 0;
+    if (soundHasVolume()) h += opt(0, cur, "Off") + opt(3, cur, "High") + opt(2, cur, "Medium") + opt(1, cur, "Low");
+    else h += opt(0, cur, "Off") + opt(3, cur, "On");
+  }
+  h += F("</select><span class='hint'>Also switched with the Sound button on the notifications screen.</span></label>");
+  h += F("<div><span class='hint'>Buzzer</span><div>");
   h += esc(soundStatus());
+  if (soundReady() && !soundHasVolume()) h += F("<br><span class='hint'>Volume needs RP2040 firmware v2 (see firmware/IndicatorRP2040).</span>");
   h += F("</div></div>");
 #endif
   if (!poLinked) {
@@ -377,11 +396,18 @@ static void handleSave() {
   bool poWas = cfg.poEnabled;
   cfg.poEnabled = server.hasArg("poEn");
   cfg.poWake = argInt("poWake", 0, 2, cfg.poWake);
-  bool listenWas = cfg.poListen;
-  cfg.poListen = server.hasArg("poListen");
+  bool listenWas = cfg.poListen, autoWas = cfg.poAuto; int autoOffWas = cfg.poAutoOff;
+  int mode = argInt("poMode", 0, 2, !cfg.poListen ? 0 : cfg.poAuto ? 2 : 1);
+  cfg.poListen = mode != 0; cfg.poAuto = mode == 2;
+  cfg.poAutoOff = argInt("poAutoOff", 0, 23, cfg.poAutoOff);
+  if (cfg.poListen != listenWas || cfg.poAuto != autoWas || cfg.poAutoOff != autoOffWas) poListenChanged();
 #if BOARD_HAS_SOUND
   cfg.alarmLevel = argInt("alLevel", 0, 2, cfg.alarmLevel);
-  cfg.soundArmed = server.hasArg("armed");
+  if (server.hasArg("sound")) {
+    int snd = argInt("sound", 0, 3, cfg.soundArmed ? cfg.alarmVolume : 0);
+    cfg.soundArmed = snd > 0;
+    if (snd > 0 && soundHasVolume()) cfg.alarmVolume = snd;
+  }
   if (!cfg.soundArmed) soundStop();
 #endif
   cfg.obsEnabled = server.hasArg("obsEn");

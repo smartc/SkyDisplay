@@ -46,5 +46,9 @@ void poClear();              // forget all stored messages
 String poLink(const String& email, const String& password, const String& twofa, const String& deviceName);
 void poUnlink();
 
+// Monitoring was switched on, off or to Auto, or the auto-off hour changed: schedule (or cancel) the automatic
+// switch-off, at the next cfg.poAutoOff:00 local time that is at least 3 hours away. Doesn't save the settings.
+void poListenChanged();
+
 // Readable state for the status screen and settings page.
 String poStateText();

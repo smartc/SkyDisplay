@@ -12,3 +12,4 @@ void   soundAlarm();       // beep-beep every 3 s until soundStop(), or for 5 mi
 void   soundChime();       // one short two-note chime
 void   soundStop();
 bool   soundAlarmOn();     // the alarm is sounding
+bool   soundHasVolume();   // the volume setting works (on the Indicator: RP2040 firmware v2 or later)

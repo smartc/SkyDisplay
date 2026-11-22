@@ -23,7 +23,8 @@ It answers one question at a glance: is tonight, or tomorrow night, worth settin
   others as a list; tap the top half for a newer message, the bottom half for an older one. A new message can wake
   the screen and switch to it (a setting), and an emergency message stays up with an Acknowledge button. On the
   Indicator an emergency message can also sound the buzzer (beep-beep every 3 seconds until you tap the screen,
-  5 minutes at most). Buttons along the bottom: Sound on/off, Monitoring on/off, Clear (this message) and Clear all.
+  5 minutes at most). Buttons along the bottom: Sound (Off, High, Med, Low), Monitoring (On, Auto, Off), Clear
+  (this message) and Clear all.
   See "Notifications" below.
 - **Status:** Wi-Fi, IP address, chart, clock sync and weather status, a QR code for the settings page, and a
   **Refresh now** button (same as "Check chart and weather now" on the settings page).
@@ -69,7 +70,10 @@ licence covers it.
 - **Monitoring** (a switch on the screen and the settings page) connects the display to Pushover. When it's off,
   for example while you're away, the display is silent and messages for it wait on Pushover's servers (up to
   21 days). They arrive quietly when it's back on: only messages under 15 minutes old can wake the screen or sound
-  the alarm.
+  the alarm. **Auto** switches it on now and off by itself at a set hour (noon by default, at least 3 hours later:
+  Auto at 21:00 means off at noon the next day); the button then shows "Auto: off 12:00".
+- Sound volume (high, medium or low) needs RP2040 firmware v2 on the Indicator; with v1 the Sound button is just
+  on and off.
 - An emergency message that Pushover repeats until acknowledged is shown once, not once per repeat.
 - Acknowledging an emergency on another device (your phone) stops the display's alarm within about 15 seconds: while
   an emergency waits, the display checks Pushover every 15 seconds (Pushover sends no signal for acknowledgements

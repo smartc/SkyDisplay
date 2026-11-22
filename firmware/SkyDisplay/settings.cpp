@@ -58,12 +58,17 @@ void settingsLoad() {
   }
   cfg.poEnabled     = prefs.getBool("poEn", d.poEnabled);
   cfg.poListen      = prefs.getBool("poListen", d.poListen);
+  cfg.poAuto        = prefs.getBool("poAuto", d.poAuto);
+  cfg.poAutoOff     = prefs.getInt("poAutoOff", d.poAutoOff);
+  if (cfg.poAutoOff < 0 || cfg.poAutoOff > 23) cfg.poAutoOff = d.poAutoOff;
+  cfg.poListenUntil = prefs.getUInt("poUntil", 0);
   cfg.poWake        = constrain(prefs.getInt("poWake", d.poWake), 0, 2);
   cfg.poSecret      = prefs.getString("poSec", "");
   cfg.poDevice      = prefs.getString("poDev", "");
   cfg.poDeviceName  = prefs.getString("poName", "");
   cfg.alarmLevel    = constrain(prefs.getInt("alLevel", d.alarmLevel), 0, 2);
   cfg.soundArmed    = prefs.getBool("armed", d.soundArmed);
+  cfg.alarmVolume   = constrain(prefs.getInt("alVol", d.alarmVolume), 1, 3);
   cfg.hostname      = prefs.getString("host", d.hostname);
   cfg.webPassword   = prefs.getString("webPass", d.webPassword);
   prefs.end();
@@ -108,12 +113,16 @@ void settingsSave() {
   }
   prefs.putBool("poEn", cfg.poEnabled);
   prefs.putBool("poListen", cfg.poListen);
+  prefs.putBool("poAuto", cfg.poAuto);
+  prefs.putInt("poAutoOff", cfg.poAutoOff);
+  prefs.putUInt("poUntil", cfg.poListenUntil);
   prefs.putInt("poWake", cfg.poWake);
   prefs.putString("poSec", cfg.poSecret);
   prefs.putString("poDev", cfg.poDevice);
   prefs.putString("poName", cfg.poDeviceName);
   prefs.putInt("alLevel", cfg.alarmLevel);
   prefs.putBool("armed", cfg.soundArmed);
+  prefs.putInt("alVol", cfg.alarmVolume);
   prefs.putString("host", cfg.hostname);
   prefs.putString("webPass", cfg.webPassword);
   prefs.end();

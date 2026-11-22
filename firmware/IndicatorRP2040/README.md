@@ -50,7 +50,7 @@ in 0x00, as in Seeed's firmware: one type byte, then a little-endian payload.
 |---|---|---|---|
 | 0xA1 | BEEP_ON | u32 ms | one beep at 2.7 kHz (Seeed's packet) |
 | 0xA2 | BEEP_OFF | | stop any sound |
-| 0xA6 | TONE | u16 Hz, u16 ms | one tone; ends by itself |
+| 0xA6 | TONE | u16 Hz, u16 ms, [u8 volume 1-100] | one tone; ends by itself. Volume is the drive (PWM duty; 100 = 50%, the loudest). v2 and later; v1 ignores it |
 | 0xA7 | PING | | answered with HELLO |
 | 0xC7 | HELLO | u8 version | every 2 s until the first PING, then in answer to PING |
 

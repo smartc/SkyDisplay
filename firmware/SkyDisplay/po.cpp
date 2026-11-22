@@ -390,6 +390,17 @@ String poLink(const String& email, const String& password, const String& twofa, 
   return "";
 }
 
+void poListenChanged() {
+  cfg.poListenUntil = 0;
+  time_t now = time(nullptr);
+  if (!cfg.poListen || !cfg.poAuto || now < 1700000000) return;
+  struct tm t; localtime_r(&now, &t);
+  t.tm_hour = cfg.poAutoOff; t.tm_min = 0; t.tm_sec = 0; t.tm_isdst = -1;
+  time_t at = mktime(&t);
+  while (at < now + 3 * 3600) { t.tm_mday++; t.tm_isdst = -1; at = mktime(&t); }  // e.g. switched on at 10:30: noon tomorrow
+  cfg.poListenUntil = (uint32_t)at;
+}
+
 void poUnlink() {
   cfg.poSecret = ""; cfg.poDevice = "";
   settingsSave();

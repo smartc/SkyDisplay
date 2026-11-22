@@ -11,5 +11,6 @@ void soundAlarm() {}
 void soundChime() {}
 void soundStop() {}
 bool soundAlarmOn() { return false; }
+bool soundHasVolume() { return false; }
 
 #endif
